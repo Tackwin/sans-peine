@@ -119,11 +119,7 @@ std::vector<uint8_t> Serial_Port::wait_read(size_t n) noexcept {
 				? (size_t)platform.status.cbInQue
 				: (n - bytes_read);
 		ReadFile(
-			platform.handle,
-			result.data() + bytes_read,
-			to_read,
-			&byte_read_this_time,
-			nullptr
+			platform.handle, result.data() + bytes_read, to_read, &byte_read_this_time, nullptr
 		);
 		bytes_read += byte_read_this_time;
 
@@ -155,9 +151,15 @@ struct Inputs_DRV425 {
 struct Inputs_MAG3110 {
 	std::uint8_t sync[N_Sync_Seq];
 	std::uint8_t id;
-	std::int32_t x;
-	std::int32_t y;
-	std::int32_t z;
+	std::int32_t x0;
+	std::int32_t x1;
+	std::int32_t x2;
+	std::int32_t y0;
+	std::int32_t y1;
+	std::int32_t y2;
+	std::int32_t z0;
+	std::int32_t z1;
+	std::int32_t z2;
 	std::int32_t sum_error;
 };
 
@@ -260,13 +262,17 @@ int main(int argc, char** argv) {
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
 
 	while (true) {
-		auto vec = serial.wait_read(opts.read_at_a_time * Reading_Byte_Size);
+		auto vec = serial.wait_read(opts.read_at_a_time);
 
 		readings.clear();
 		size_t offset{ 0 };
 
 		for (; offset + Reading_Byte_Size < vec.size(); ++offset)
 			if (memcmp(vec.data() + offset, Sync_Seq, N_Sync_Seq) == 0) break;
+
+		if (offset > 0) {
+			printf("Ignored %.*s\n", offset, vec.data());
+		}
 
 		Reading r;
 		bool reading1_ready = false;
@@ -287,20 +293,28 @@ int main(int argc, char** argv) {
 			Inputs_MAG3110 in =
 				*reinterpret_cast<Inputs_MAG3110*>(vec.data() + i);
 
-			if (in.sum_error != in.x + in.y + in.z) {
-				fprintf(stderr, "Error checksum %d != %d\n", in.sum_error, in.x + in.y + in.z);
+			auto x = (in.x0 + in.x1 + in.x2) / 3;
+			auto y = (in.y0 + in.y1 + in.y2) / 3;
+			auto z = (in.z0 + in.z1 + in.z2) / 3;
+
+			if (
+				in.x0 != in.x1 || in.x1 != in.x2 ||
+				in.y0 != in.y1 || in.y1 != in.y2 ||
+				in.z0 != in.z1 || in.z1 != in.z2
+			) {
+				fprintf(stderr, "Error transmission\n");
 			}
 
-			double tx = mag_to_tesla(in.x);
-			double ty = mag_to_tesla(in.y);
-			double tz = mag_to_tesla(in.z);
+			double tx = mag_to_tesla(x);
+			double ty = mag_to_tesla(y);
+			double tz = mag_to_tesla(z);
 			double t = std::hypot(tx, ty, tz);
 
 			if (in.id == 0) {
 				r.beacon1 = t;
 				reading1_ready = true;
 			}
-			if (in.id == 1) {
+			if (in.id == 0) {
 				r.beacon2 = t;
 				reading2_ready = true;
 			}
@@ -313,12 +327,12 @@ int main(int argc, char** argv) {
 			printf(
 				"Read[%d] % 10d MAG(x) % 10d MAG(y) % 10d MAG(z) % 10.1llf uT(x) % 10.1llf uT(y) % 10.1llf uT(z)\n",
 				(int)in.id,
-				in.x,
-				in.y,
-				in.z,
-				1'000'000 * mag_to_tesla(in.x),
-				1'000'000 * mag_to_tesla(in.y),
-				1'000'000 * mag_to_tesla(in.z)
+				x,
+				y,
+				z,
+				1'000'000 * mag_to_tesla(x),
+				1'000'000 * mag_to_tesla(y),
+				1'000'000 * mag_to_tesla(z)
 			);
 
 #endif

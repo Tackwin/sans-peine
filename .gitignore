@@ -6,5 +6,6 @@
 **/.vscode
 **/*.sublime-workspace
 **/*.exe
+**/*.pdb
+**/*.ilk
 **/ease_build
-Simulation/
