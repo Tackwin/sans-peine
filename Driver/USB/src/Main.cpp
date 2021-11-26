@@ -151,16 +151,9 @@ struct Inputs_DRV425 {
 struct Inputs_MAG3110 {
 	std::uint8_t sync[N_Sync_Seq];
 	std::uint8_t id;
-	std::int32_t x0;
-	std::int32_t x1;
-	std::int32_t x2;
-	std::int32_t y0;
-	std::int32_t y1;
-	std::int32_t y2;
-	std::int32_t z0;
-	std::int32_t z1;
-	std::int32_t z2;
-	std::int32_t sum_error;
+	float x;
+	float y;
+	float z;
 };
 
 struct Opts {
@@ -193,8 +186,8 @@ double volt_to_tesla(double volt) noexcept {
 	return volt / (4 * 12.2 * 1000);
 }
 
-double mag_to_tesla(std::int32_t mag) noexcept {
-	return (1 / 1'000'000.0) * mag / 10.0;
+double mmag_to_tesla(float mag) noexcept {
+	return (1 / 1'000'000.0) * mag / 1'000.0;
 }
 
 int32_t read_int32(const std::vector<std::uint8_t>& buf, size_t i) noexcept {
@@ -241,7 +234,7 @@ void send_over_mail(
 	);
 
 	if (!fResult) {
-		fprintf(stderr, "Write failed with %d.\n", GetLastError());
+		// fprintf(stderr, "Write failed with %d.\n", GetLastError());
 	}
 }
 constexpr auto Reading_Byte_Size =
@@ -293,28 +286,16 @@ int main(int argc, char** argv) {
 			Inputs_MAG3110 in =
 				*reinterpret_cast<Inputs_MAG3110*>(vec.data() + i);
 
-			auto x = (in.x0 + in.x1 + in.x2) / 3;
-			auto y = (in.y0 + in.y1 + in.y2) / 3;
-			auto z = (in.z0 + in.z1 + in.z2) / 3;
-
-			if (
-				in.x0 != in.x1 || in.x1 != in.x2 ||
-				in.y0 != in.y1 || in.y1 != in.y2 ||
-				in.z0 != in.z1 || in.z1 != in.z2
-			) {
-				fprintf(stderr, "Error transmission\n");
-			}
-
-			double tx = mag_to_tesla(x);
-			double ty = mag_to_tesla(y);
-			double tz = mag_to_tesla(z);
+			double tx = mmag_to_tesla(in.x);
+			double ty = mmag_to_tesla(in.y);
+			double tz = mmag_to_tesla(in.z);
 			double t = std::hypot(tx, ty, tz);
 
 			if (in.id == 0) {
 				r.beacon1 = t;
 				reading1_ready = true;
 			}
-			if (in.id == 0) {
+			if (in.id == 1) {
 				r.beacon2 = t;
 				reading2_ready = true;
 			}
@@ -325,14 +306,11 @@ int main(int argc, char** argv) {
 				reading2_ready = false;
 			}
 			printf(
-				"Read[%d] % 10d MAG(x) % 10d MAG(y) % 10d MAG(z) % 10.1llf uT(x) % 10.1llf uT(y) % 10.1llf uT(z)\n",
+				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z)\n",
 				(int)in.id,
-				x,
-				y,
-				z,
-				1'000'000 * mag_to_tesla(x),
-				1'000'000 * mag_to_tesla(y),
-				1'000'000 * mag_to_tesla(z)
+				in.x,
+				in.y,
+				in.z
 			);
 
 #endif

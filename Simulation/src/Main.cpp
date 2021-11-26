@@ -4,6 +4,8 @@
 #include "imgui-SFML.h"
 
 #include <SFML/Graphics/RenderWindow.hpp>
+#include <SFML/Graphics/Image.hpp>
+#include <SFML/Graphics/Texture.hpp>
 #include <SFML/System/Clock.hpp>
 #include <SFML/Window/Event.hpp>
 #include <SFML/Graphics/CircleShape.hpp>
@@ -12,6 +14,7 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <optional>
 
 #include <Windows.h>
 
@@ -67,6 +70,27 @@ struct State {
 
 		double magnet_strength = 1;
 	} space_sim;
+
+	struct Simulation_Result {
+		size_t resolution = 0;
+		std::vector<double> field;
+
+		bool display_x = false;
+		bool display_y = false;
+		bool display_z = false;
+
+		struct Reading {
+			double x = 0;
+			double y = 0;
+			double z = 0;
+		};
+		std::vector<Reading> readings;
+
+		double noise = 0;
+	};
+
+	sf::Texture field_texture;
+	std::optional<Simulation_Result> space_res;
 };
 
 // Calculate the magnetic field strength 
@@ -80,7 +104,7 @@ void render_plot(const std::vector<Reading>& readings) noexcept;
 
 void toggle_fullscreen(State& state) noexcept;
 
-void start_space_sim(State::Space_Simulation& state) noexcept;
+State::Simulation_Result space_sim(State::Space_Simulation& state) noexcept;
 
 #undef main
 // Main code
@@ -195,6 +219,60 @@ void update(double dt, State& state) noexcept {
 
 }
 
+void upload_field_texture(State& state) noexcept {
+	double* gridx = state.space_res->field.data();
+	double* gridy = gridx + state.space_res->field.size() / 3;
+	double* gridz = gridy + state.space_res->field.size() / 3;
+
+	static sf::Image field_color;
+	thread_local bool field_color_init = false;
+	if (!field_color_init)
+		field_color.create(state.space_res->resolution + 1, state.space_res->resolution + 1);
+	field_color_init = true;
+
+	auto color = [](double t) -> auto {
+		t = t > 0 ? t : -t;
+
+		t = 1 - std::exp(-t);
+		t = std::sqrt(t);
+
+		return (uint8_t)(t * 255);
+	};
+
+	double noise = state.space_res->noise * state.space_res->noise;
+	for (size_t x = 0; x < state.space_res->field.size() / 3; ++x) {
+		double read_x = gridx[x];
+		double read_y = gridy[x];
+		double read_z = gridz[x];
+
+		sf::Color computed_color;
+		auto n_readings = state.space_res->readings.size();
+		for (auto& r : state.space_res->readings) {
+			if ((r.x - read_x) * (r.x - read_x) < noise) computed_color.r += 255 / n_readings;
+			if ((r.y - read_y) * (r.y - read_y) < noise) computed_color.g += 255 / n_readings;
+			if ((r.z - read_z) * (r.z - read_z) < noise) computed_color.b += 255 / n_readings;
+		}
+
+		computed_color.r = computed_color.r > 0 ? computed_color.r : color(read_x);
+		computed_color.g = computed_color.g > 0 ? computed_color.g : color(read_y);
+		computed_color.b = computed_color.b > 0 ? computed_color.b : color(read_z);
+
+		field_color.setPixel(
+			x % (state.space_res->resolution + 1),
+			x / (state.space_res->resolution + 1),
+			{
+				(uint8_t)(state.space_res->display_x ? computed_color.r : 0),
+				(uint8_t)(state.space_res->display_y ? computed_color.g : 0),
+				(uint8_t)(state.space_res->display_z ? computed_color.b : 0)
+			}
+		);
+	}
+
+	if (state.field_texture.getSize().x != field_color.getSize().x)
+		state.field_texture.create(field_color.getSize().x, field_color.getSize().y);
+	state.field_texture.update(field_color);
+}
+
 void render(State& state) noexcept {
 	static bool open_demo = false;
 	static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
@@ -251,9 +329,48 @@ void render(State& state) noexcept {
 		ImGui::SliderDouble("h", &state.space_sim.h, 0, 0.1);
 		ImGui::SliderDouble("strength", &state.space_sim.magnet_strength, 0, 0.1);
 		if (ImGui::Button("Compute")) {
-				start_space_sim(state.space_sim);
+			state.space_res = space_sim(state.space_sim);
+			state.space_res->display_x = true;
+			state.space_res->display_y = true;
+			state.space_res->display_z = true;
+
+			upload_field_texture(state);
+		}
+		if (state.space_res) {
+			ImGui::Separator();
+
+			bool dirty = false;
+			dirty |= ImGui::Checkbox("X", &state.space_res->display_x);
+			dirty |= ImGui::Checkbox("Y", &state.space_res->display_y);
+			dirty |= ImGui::Checkbox("Z", &state.space_res->display_z);
+
+			ImGui::Separator();
+
+			if (ImGui::Button("Add reading")) state.space_res->readings.push_back({});
+			if (state.space_res->readings.size() > 0) {
+				ImGui::SameLine();
+				if (ImGui::Button("Del reading")) state.space_res->readings.pop_back();
+			}
+
+			dirty |= ImGui::SliderDouble("Noise", &state.space_res->noise, 0, 1, "%.7f", 4);
+
+			for (auto& r : state.space_res->readings) {
+				ImGui::PushID(&r);
+				dirty |= ImGui::SliderDouble("X", &r.x, 0, 1, "%.7f", 4);
+				dirty |= ImGui::SliderDouble("Y", &r.y, 0, 1, "%.7f", 4);
+				dirty |= ImGui::SliderDouble("Z", &r.z, 0, 1, "%.7f", 4);
+				ImGui::PopID();
+			}
+
+			if (dirty) upload_field_texture(state);
 		}
 		ImGui::PopID();
+	}
+
+	if (state.space_res) {
+		ImGui::Begin("Result");
+		ImGui::Image(state.field_texture);
+		ImGui::End();
 	}
 
 	ImGui::End();
@@ -386,7 +503,7 @@ void toggle_fullscreen(State& state) noexcept {
 	state.fullscreen = !state.fullscreen;
 }
 
-void start_space_sim(State::Space_Simulation& state) noexcept {
+State::Simulation_Result space_sim(State::Space_Simulation& state) noexcept {
 	double h = state.h;
 	double dist = state.pivot_distance + h / 2;
 
@@ -438,7 +555,11 @@ void start_space_sim(State::Space_Simulation& state) noexcept {
 	double B0 = state.magnet_strength;
 	double b = state.h / 2;
 
-	auto at = [=](double a, double p, double z) -> double {
+	struct Cylindrical_Vec {
+		double p;
+		double z;
+	};
+	auto at = [=](double a, double p, double z) -> Cylindrical_Vec {
 		double zp = z + b;
 		double zm = z - b;
 		double ap = a / std::sqrt(zp * zp + (p + a) * (p + a));
@@ -452,13 +573,18 @@ void start_space_sim(State::Space_Simulation& state) noexcept {
 		double Bp = B0 * (ap * C(kp, 1, 1, -1) - am * C(km, 1, 1, -1));
 		double Bz = B0 * a / (a + p) * (bp * C(kp, g *g, 1, g) - bm * C(km, g * g, 1, g));
 
-		return std::sqrt(Bp * Bp + Bz * Bz);
+		return { Bp, Bz };
 	};
 
 
-	double* grid = (double*)malloc(
-		sizeof(double) * (state.resolution + 1) * (state.resolution + 1)
-	);
+	State::Simulation_Result result;
+
+	result.field.resize((state.resolution + 1) * (state.resolution + 1) * 3);
+
+	double* gridx = result.field.data();
+	double* gridy = gridx + (state.resolution + 1) * (state.resolution + 1);
+	double* gridz = gridy + (state.resolution + 1) * (state.resolution + 1);
+
 	double max_ = 0;
 	double min_ = 0;
 
@@ -502,30 +628,25 @@ void start_space_sim(State::Space_Simulation& state) noexcept {
 		dz -= z * vz;
 		double p = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-		grid[x + y * (state.resolution + 1)] = at(state.R_out, p, z) - at(state.R_in, p, z);
+		auto [rout_p, rout_z] = at(state.R_out, p, z);
+		auto [rin_p,  rin_z]  = at(state.R_in, p, z);
 
-		max_ = std::max(grid[x + y * (state.resolution + 1)], max_);
-		min_ = std::min(grid[x + y * (state.resolution + 1)], min_);
+		double resx = vx * (rout_z - rin_z);
+		double resy = vy * (rout_z - rin_z);
+		double resz = vz * (rout_z - rin_z);
+		
+		resx += dx * (rout_p - rin_p);
+		resy += dy * (rout_p - rin_p);
+		resz += dz * (rout_p - rin_p);
+
+		gridx[x + y * (state.resolution + 1)] = resx;
+		gridy[x + y * (state.resolution + 1)] = resy;
+		gridz[x + y * (state.resolution + 1)] = resz;
+
+		// grid[x + y * (state.resolution + 1)] = at(state.R_out, p, z) - at(state.R_in, p, z);
 	}
 
-	sf::Image image;
-	image.create(state.resolution + 1, state.resolution + 1);
+	result.resolution = state.resolution;
 
-	auto color = [](double t) -> auto {
-		t = t > 0 ? t : -t;
-
-		t = 1 - std::exp(-t);
-		t = std::sqrt(t);
-
-		return sf::Color(t * 255, t * 255, t * 255);
-	};
-
-	for (size_t x = 0; x < image.getSize().x * image.getSize().y; ++x)
-		image.setPixel(
-			x % (state.resolution + 1), x / (state.resolution + 1), color(grid[x])
-		);
-
-	image.saveToFile("simulation.png");
-
-	free(grid);
+	return result;
 }
