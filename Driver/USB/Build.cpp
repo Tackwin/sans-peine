@@ -10,5 +10,7 @@ Build build(Flags flags) noexcept {
 
 	b.add_source("src/main.cpp");
 
+	b.add_define("_CRT_SECURE_NO_WARNINGS");
+
 	return b;
 }

@@ -162,8 +162,10 @@ struct Inputs_MAG3110 {
 };
 
 struct Opts {
-	size_t read_at_a_time = sizeof(Inputs_MAG3110) * 32;
 	std::string com_name = "\\\\.\\COM3";
+
+	const char* record = nullptr;
+	const char* replay = nullptr;
 
 	static Opts parse(int argc, char** argv) noexcept {
 		Opts res;
@@ -175,8 +177,9 @@ struct Opts {
 		for (int i = 0; i < argc; ++i) {
 			auto it = argv[i];
 
-			if (eq(it, "-r")) res.read_at_a_time = std::stoi(argv[i + 1]);
-			if (eq(it, "-c")) res.com_name = argv[i + 1];
+			if (eq(it, "-c")) res.com_name = argv[++i];
+			if (eq(it, "--record")) res.record = argv[++i];
+			if (eq(it, "--replay")) res.replay = argv[++i];
 		}
 
 		return res;
@@ -226,6 +229,32 @@ HANDLE open_slot() noexcept {
 	return mail_slot;
 }
 
+void append_to(const char* filename, void* data, size_t n_data) {
+	auto f = fopen(filename, "ab");
+	if (!f) return;
+	fseek(f, 0, SEEK_END);
+	fwrite(data, 1, n_data, f);
+	fclose(f);
+}
+
+
+std::vector<Reading> replay(const char* filename) {
+	auto f = fopen(filename, "rb");
+	if (!f) return {};
+
+	fseek(f, 0, SEEK_END);
+	auto size = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	std::vector<Reading> result;
+	result.resize(size / sizeof(Reading));
+
+	fread(result.data(), 1, size, f);
+
+	fclose(f);
+	return result;
+}
+
 void send_over_mail(
 	HANDLE mail_slot, Reading readings
 ) noexcept {
@@ -252,16 +281,24 @@ constexpr auto Reading_Byte_Size =
 
 int main(int argc, char** argv) {
 	Opts opts = Opts::parse(argc - 1, argv + 1);
+	HANDLE mail_slot = open_slot();
+
+	if (opts.replay) {
+		auto read = replay(opts.replay);
+		for (auto& x : read) send_over_mail(mail_slot, x);
+
+		return 0;
+	}
+
 
 	Serial_Port serial(opts.com_name);
-	HANDLE mail_slot = open_slot();
 	std::vector<Reading> readings;
 
 	uint8_t Sync_Seq[N_Sync_Seq];
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
 
 	while (true) {
-		auto vec = serial.wait_read(opts.read_at_a_time);
+		auto vec = serial.wait_read(32 * sizeof(Inputs_MAG3110));
 
 		readings.clear();
 		size_t offset{ 0 };
@@ -322,6 +359,9 @@ int main(int argc, char** argv) {
 #endif
 		}
 		for (auto& x : readings) send_over_mail(mail_slot, x);
+
+		if (opts.record)
+			append_to(opts.record, readings.data(), readings.size() * sizeof(Reading));
 	}
 
 	return 0;
