@@ -2,7 +2,12 @@
 #include <string>
 #include <cstdint>
 #include <cmath>
+
+#define NOMINMAX
 #include "Windows.h"
+
+template<typename T>
+T min(T a, T b) noexcept { return a > b ? a : b; }
 
 struct Serial_Port_Window {
 	HANDLE handle{ INVALID_HANDLE_VALUE };
@@ -99,7 +104,7 @@ std::vector<uint8_t> Serial_Port::read(size_t n) noexcept {
 
 	std::vector<uint8_t> result(n);
 	ReadFile(platform.handle, result.data(), n, &bytes_read, NULL);
-	result.resize(bytes_read);
+	result.resize(min((size_t)bytes_read, n));
 
 	return result;
 }
@@ -125,7 +130,7 @@ std::vector<uint8_t> Serial_Port::wait_read(size_t n) noexcept {
 
 		Sleep(100);
 	}
-	result.resize(bytes_read);
+	result.resize(min(bytes_read, n));
 	return result;
 }
 
@@ -196,8 +201,8 @@ int32_t read_int32(const std::vector<std::uint8_t>& buf, size_t i) noexcept {
 
 #pragma pack(1)
 struct Reading {
-	double beacon1;
-	double beacon2;
+	static constexpr size_t N_Beacons = 3;
+	double beacons[N_Beacons];
 	bool pressed;
 };
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
@@ -212,6 +217,7 @@ HANDLE open_slot() noexcept {
 		FILE_ATTRIBUTE_NORMAL,
 		nullptr
 	);
+
 	if (mail_slot == INVALID_HANDLE_VALUE) {
 		fprintf(stderr, "Error while opening mail slot\n");
 		fprintf(stderr, "CreateFile failed with %d.\n", GetLastError());
@@ -268,9 +274,12 @@ int main(int argc, char** argv) {
 		}
 
 		Reading r;
-		bool reading1_ready = false;
-		bool reading2_ready = false;
-		for (size_t i = offset; i < vec.size(); i += sizeof(Inputs_MAG3110)) {
+		bool reading_ready[Reading::N_Beacons] = { false };
+		for (
+			size_t i = offset;
+			i + sizeof(Inputs_MAG3110) < vec.size();
+			i += sizeof(Inputs_MAG3110)
+		) {
 #if 0 // DRV425
 			Inputs_DRV425 in = *reinterpret_cast<Inputs*>(vec.data() + i);
 			printf(
@@ -283,6 +292,7 @@ int main(int argc, char** argv) {
 				1'000'000 * volt_to_tesla(lsb_to_volt(in.digital_2))
 			);
 #else // MAG3110
+
 			Inputs_MAG3110 in =
 				*reinterpret_cast<Inputs_MAG3110*>(vec.data() + i);
 
@@ -291,26 +301,22 @@ int main(int argc, char** argv) {
 			double tz = mmag_to_tesla(in.z);
 			double t = std::hypot(tx, ty, tz);
 
-			if (in.id == 0) {
-				r.beacon1 = t;
-				reading1_ready = true;
-			}
-			if (in.id == 1) {
-				r.beacon2 = t;
-				reading2_ready = true;
-			}
-			if (reading1_ready && reading2_ready) {
+			reading_ready[in.id] = true;
+			r.beacons[in.id] = t;
+
+			if (memchr(reading_ready, 0, Reading::N_Beacons) == NULL) {
 				r.pressed = true;
 				readings.push_back(r);
-				reading1_ready = false;
-				reading2_ready = false;
+				memset(reading_ready, 0, Reading::N_Beacons);
 			}
+
 			printf(
-				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z)\n",
+				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z) % 10.4lf\n",
 				(int)in.id,
 				in.x,
 				in.y,
-				in.z
+				in.z,
+				std::sqrt(in.x * in.x + in.y * in.y + in.z * in.z)
 			);
 
 #endif

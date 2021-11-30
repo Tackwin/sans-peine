@@ -1,6 +1,7 @@
 #include "Arduino.h"
 #include "Wire.h"
 #include "HMC5883L.h"
+#include "TCA9548.h"
 
 constexpr auto N_Sync_Seq = 32;
 
@@ -10,6 +11,7 @@ void serial_printf(const char *fmt, ...) {
 	char buf[vsnprintf(NULL, 0, fmt, va) + 1];
 	vsprintf(buf, fmt, va);
 	Serial.print(buf);
+	Serial.flush();
 	va_end(va);
 }
 
@@ -19,31 +21,53 @@ void use_bus(uint8_t bus) noexcept {
 	Wire.endTransmission();
 }
 
-constexpr size_t N_Beacons = 2;
+constexpr size_t N_Beacons = 8;
 HMC5883L beacons[N_Beacons];
-bool healthy = false;
-size_t BUS_MAP[] = {2, 3};
+bool healthy[N_Beacons] = { false };
+
+TCA9548 multiplexer(0x70);
+size_t BUS_MAP[] = {0, 1, 2, 3, 4, 5, 6, 7};
 
 void setup() {
+	Wire.setWireTimeout(1000);
 	Wire.begin();
 	Serial.begin(115200);
 
-	for (size_t i = 0; i < N_Beacons; ++i) {
-		use_bus(BUS_MAP[i]);
-		bool res = beacons[i].begin();
-		beacons[i].setSamples(HMC5883L_SAMPLES_8);
-		beacons[i].setRange(HMC5883L_RANGE_0_88GA);
-		beacons[i].setDataRate(HMC5883L_DATARATE_75HZ);
-		if (!res) {
-			serial_printf("Error init %d\n", (int)i);
-			return;
-		}
+	HMC5883L beacon_test;
+	if (!beacon_test.begin()) {
+		serial_printf("Beacon test FAIL !");
+	} else {
+		serial_printf("Beacon test OK !");
 	}
 
-	healthy = true;
+	bool res = multiplexer.begin();
+	if (!res) {
+		serial_printf("Multiplexer error\n");
+		return;
+	}
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		multiplexer.selectChannel(BUS_MAP[i]);
+		serial_printf("Trying to init %d", (int)i);
+		bool res = beacons[i].begin();
+		healthy[i] = res;
+		if (!res) {
+			serial_printf("\nError init %d\n", (int)i);
+			continue;
+		}
+		serial_printf(".");
+		beacons[i].setSamples(HMC5883L_SAMPLES_1);
+		serial_printf(".");
+		beacons[i].setRange(HMC5883L_RANGE_1_3GA);
+		serial_printf(".");
+		beacons[i].setDataRate(HMC5883L_DATARATE_75HZ);
+		serial_printf(".\n");
+		serial_printf("Initialized %d\n", (int)i);
+
+	}
 }
 
 struct __attribute__((packed)) Output {
+
 	uint8_t sync[N_Sync_Seq];
 	uint8_t id;
 	float x;
@@ -56,14 +80,16 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync[i] = i;
 	out.id = id;
-	out.x = x
+	out.x = x;
+	out.y = y;
+	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
 }
 
 void loop() {
-	for (size_t i = 0; i < N_Beacons; ++i) {
-		use_bus(BUS_MAP[i]);
+	for (size_t i = 0; i < N_Beacons; ++i) if (healthy[i]) {
+		multiplexer.selectChannel(BUS_MAP[i]);
 		auto read = beacons[i].readNormalize();
 		send_mag((uint8_t)i, read.XAxis, read.YAxis, read.ZAxis);
 	}

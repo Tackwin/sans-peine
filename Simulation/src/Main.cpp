@@ -1,4 +1,3 @@
-
 #include "imgui.h"
 #include "imgui_ext.h"
 #include "imgui-SFML.h"
@@ -15,6 +14,7 @@
 #include <cmath>
 #include <random>
 #include <optional>
+#include <cstdio>
 
 #include <Windows.h>
 
@@ -22,14 +22,15 @@ constexpr auto PI = 3.1415926;
 constexpr const char* App_Name = "SP Sim";
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
 
+constexpr size_t N_Beacons = 3;
 struct Reading {
-	double beacon1;
-	double beacon2;
+	double beacons[N_Beacons];
 	bool pressed;
 };
+
 struct State {
 	size_t n_beacons_placed = 0;
-	std::array<sf::Vector2f, 2> beacons;
+	std::array<sf::Vector2f, N_Beacons> beacons;
 
 	float x = 0;
 	float y = 0;
@@ -72,6 +73,7 @@ struct State {
 	} space_sim;
 
 	struct Simulation_Result {
+		double noise = 0;
 		size_t resolution = 0;
 		std::vector<double> field;
 
@@ -86,7 +88,11 @@ struct State {
 		};
 		std::vector<Reading> readings;
 
-		double noise = 0;
+		struct Candidate_Point {
+			size_t x = 0;
+			size_t y = 0;
+		};
+		std::vector<Candidate_Point> candidate_points;
 	};
 
 	sf::Texture field_texture;
@@ -162,7 +168,7 @@ void update(double dt, State& state) noexcept {
 	state.y = (float)sf::Mouse::getPosition(*state.window).y;
 
 	if (state.right_clicked) {
-		if (state.n_beacons_placed >= 2) {
+		if (state.n_beacons_placed >= N_Beacons) {
 			state.n_beacons_placed = 0;
 		} else {
 			state.beacons[state.n_beacons_placed] = {
@@ -172,7 +178,7 @@ void update(double dt, State& state) noexcept {
 		}
 	}
 
-	if (state.n_beacons_placed == 2 && state.recording) {
+	if (state.n_beacons_placed == N_Beacons && state.recording) {
 		double max_res = (1 << (state.resolution - 1));
 		double dt_beacons =
 			(state.beacons[0].x - state.beacons[1].x) * (state.beacons[0].x - state.beacons[1].x) +
@@ -207,7 +213,12 @@ void update(double dt, State& state) noexcept {
 		r2 += dist(gen);
 		r2 = state.max_range * std::round((r2 / state.max_range) * max_res) / max_res;
 
-		state.readings.push_back({r1, r2, sf::Mouse::isButtonPressed(sf::Mouse::Left)});
+		Reading new_reading;
+		new_reading.beacons[0] = r1;
+		new_reading.beacons[1] = r2;
+		new_reading.pressed = sf::Mouse::isButtonPressed(sf::Mouse::Left);
+
+		state.readings.push_back(new_reading);
 
 		if (state.time_since_write >= 1.0 / state.frequency) {
 			state.time_since_write = 0;
@@ -271,6 +282,59 @@ void upload_field_texture(State& state) noexcept {
 	if (state.field_texture.getSize().x != field_color.getSize().x)
 		state.field_texture.create(field_color.getSize().x, field_color.getSize().y);
 	state.field_texture.update(field_color);
+}
+
+void update_candidate_point(State::Simulation_Result& state) noexcept {
+	state.candidate_points.clear();
+	if (state.readings.empty()) return;
+
+	double* gridx = state.field.data();
+	double* gridy = gridx + state.field.size() / 3;
+	double* gridz = gridy + state.field.size() / 3;
+
+	size_t stride = state.resolution + 1;
+
+	thread_local bool* mask = nullptr;
+	thread_local size_t mask_size = 0;
+	if (mask_size != state.field.size()) {
+		if (mask) free(mask);
+		mask = (bool*)malloc(state.field.size() / 3);
+		mask_size = state.field.size() / 3;
+	}
+
+	double noise = state.noise * state.noise;
+	for (size_t i = 0; i < mask_size; i++) {
+		double dx = gridx[i] - state.readings[0].x;
+		double dy = gridy[i] - state.readings[0].y;
+		double dz = gridz[i] - state.readings[0].z;
+
+		mask[i] = (dx * dx < noise && dy * dy < noise && dz * dz < noise);
+	}
+
+	for (size_t i = 0; i < mask_size; i++) {
+		if (mask[i]) {
+			size_t sx = 0;
+			size_t sy = 0;
+			size_t n = 0;
+
+			auto rec = [&](size_t x, size_t y, auto rec) -> void {
+				if (mask[x + y * stride]) {
+					sx += x;
+					sy += y;
+					n += 1;
+					mask[x + y * stride] = false;
+
+					if (x > 0) rec(x - 1, y, rec);
+					if (y > 0) rec(x, y - 1, rec);
+					if (x + 1 < stride) rec(x + 1, y, rec);
+					if (y + 1 < stride) rec(x, y + 1, rec);
+				}
+			};
+
+			rec(i % stride, i / stride, rec);
+			state.candidate_points.push_back({ sx / n, sy / n });
+		}
+	}
 }
 
 void render(State& state) noexcept {
@@ -362,7 +426,16 @@ void render(State& state) noexcept {
 				ImGui::PopID();
 			}
 
-			if (dirty) upload_field_texture(state);
+			if (dirty) {
+				upload_field_texture(state);
+				update_candidate_point(*state.space_res);
+			}
+
+			ImGui::Separator();
+
+			for (auto& x : state.space_res->candidate_points) {
+				ImGui::Text("%zu, %zu", x.x, x.y);
+			}
 		}
 		ImGui::PopID();
 	}
@@ -396,44 +469,45 @@ void render(State& state) noexcept {
 
 }
 
+
 void render_plot(const std::vector<Reading>& readings) noexcept {
 	static std::vector<std::vector<float>> lines;
 	static std::vector<const float*> ys;
 	static size_t N_Samples = 10000;
 
-	static const char* names[2] = {
-		"Beacon 1",
-		"Beacon 2"
-	};
+	static std::array<char*, N_Beacons> names = { nullptr };
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		free(names[i]);
+		names[i] = (char*)malloc(sizeof("Beacons XXXXXXX"));
+		sprintf(names[i], "Beacon %d", (int)i);
+	}
 
 	lines.clear();
 	ys.clear();
 
-	lines.resize(2);
+	lines.resize(N_Beacons);
 
-	float max = 0;
+	float maxs[N_Beacons];
 	size_t n = readings.size();
-	for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
-		auto& [a, _, __] = readings[i];
-		lines[0].push_back((float)a);
-		max = (float)(a > max ? a : max);
-	}
-	for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
-		auto& [_, b, __] = readings[i];
-		lines[1].push_back((float)b);
-		max = (float)(b > max ? b : max);
+
+	for (size_t j = 0; j < N_Beacons; ++j) {
+		for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
+			auto& a = readings[i].beacons[j];
+			lines[j].push_back((float)a);
+			maxs[j] = (float)(a > maxs[j] ? a : maxs[j]);
+		}
 	}
 
-	ys.push_back(lines[0].data());
-	ys.push_back(lines[1].data());
+	for (size_t i = 0; i < N_Beacons; ++i) ys.push_back(lines[i].data());
 
 	ImGui::PlotConfig conf;
 	conf.values.ys_list = ys.data();
-	conf.values.ys_count = 2;
+	conf.values.ys_count = N_Beacons;
 	conf.values.count = (int)std::min(readings.size(), N_Samples);
 
 	conf.scale.min = 0;
-	conf.scale.max = 1.1f * max;
+	for (auto& x : maxs) conf.scale.max = std::max(conf.scale.max, x);
+	conf.scale.max *= 1.1f;
 
 	conf.tooltip.show = true;
 
@@ -445,10 +519,20 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 
 	conf.frame_size = { ImGui::GetWindowWidth() * 0.95f, 100 };
 
-	conf.tooltip.ys_names = names;
+	conf.tooltip.ys_names = names.data();
 	conf.tooltip.format = "%s, %g: % 12.9f";
 
 	ImGui::Plot("Readings", conf);
+
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		conf.values.ys_list = ys.data() + i;
+		conf.values.ys_count = 1;
+		conf.scale.max = 1.1f * maxs[i];
+
+		conf.grid_y.size = conf.scale.max / 5;
+
+		ImGui::Plot(names[i], conf);
+	}
 
 	ImGui::SliderSize("#Samples", &N_Samples, 10, 1000);
 }
@@ -490,7 +574,9 @@ void write_mail(State& state, Reading msg) noexcept {
 		nullptr
 	);
 
-	if (!fResult) fprintf(stderr, "Write failed with %d.\n", (int)GetLastError());
+	if (!fResult) 
+	
+	fprintf(stderr, "Write failed with %d.\n", (int)GetLastError());
 }
 
 void toggle_fullscreen(State& state) noexcept {
@@ -590,7 +676,7 @@ State::Simulation_Result space_sim(State::Space_Simulation& state) noexcept {
 
 	for (size_t x = 0; x <= state.resolution; x++) for (size_t y = 0; y <= state.resolution; y++) {
 		// the point to probe in cartesian space
-		double px = (double)x / state.resolution - 0.5;
+		double px = (double)x / state.resolution;
 		double py = (double)y / state.resolution - 0.5;
 		double pz = 0;
 		px *= 0.500; // in meter

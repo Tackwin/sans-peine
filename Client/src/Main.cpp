@@ -25,15 +25,24 @@
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
 constexpr const char* App_Name = "SP Client";
 
+constexpr size_t N_Beacons = 3;
+
 #pragma pack(1)
 struct Reading {
-	double beacon1;
-	double beacon2;
+	double beacons[N_Beacons] = { 0 };
 	bool pressed;
 };
+
+struct Beacon {
+	sf::Vector2f pos;
+
+	sf::Vector3f sum_sample = {};
+	size_t calibration_sample = 0;
+};
+
 struct State {
 	size_t n_beacons_placed = 0;
-	std::array<sf::Vector2f, 2> beacons;
+	std::array<Beacon, N_Beacons> beacons;
 	bool right_clicked = false;
 	double beacon_distance = 0.1; // in meters
 
@@ -51,6 +60,8 @@ struct State {
 	bool fullscreen = false;
 
 	std::vector<Reading> readings;
+
+	bool calibrating = false;
 };
 
 
@@ -62,7 +73,7 @@ void update(State& state) noexcept;
 void render(State& state) noexcept;
 void render_plot(const std::vector<Reading>& readings) noexcept;
 
-sf::Vector2f triangulate(State& state, Reading r) noexcept;
+std::optional<sf::Vector2f> triangulate(State& state, Reading r, size_t bi, size_t bj) noexcept;
 
 #undef main
 // Main code
@@ -118,39 +129,48 @@ void update(State& state) noexcept {
 	thread_local std::vector<Reading> avg_readings;
 
 	if (state.right_clicked) {
-		if (state.n_beacons_placed >= 2) {
+		if (state.n_beacons_placed >= N_Beacons) {
 			state.n_beacons_placed = 0;
 		} else {
-			state.beacons[state.n_beacons_placed] = {
+			state.beacons[state.n_beacons_placed].pos = {
 				(float)sf::Mouse::getPosition(*state.window).x,
 				(float)sf::Mouse::getPosition(*state.window).y
 			};
+			state.beacons[state.n_beacons_placed].calibration_sample = 0;
+			state.beacons[state.n_beacons_placed].sum_sample = {};
 			state.n_beacons_placed++;
 		}
 	}
 
 	auto res = read_mail(state);
+	while(res) {
 
-	if (res) {
-		avg_readings.push_back(*res);
-		if (avg_readings.size() >= state.oversampling) {
-			Reading avg = {};
-			size_t n_pressed = 0;
-			for (auto& x : avg_readings) {
-				avg.beacon1 += x.beacon1;
-				avg.beacon2 += x.beacon2;
-				n_pressed += (x.pressed ? 1 : 0);
+		if (state.calibrating) {
+			for (size_t i = 0; i < N_Beacons; ++i) {
+				state.beacons[i].calibration_sample++;
+				state.beacons[i].sum_sample.x += res->beacons[i];
 			}
-			avg.beacon1 /= avg_readings.size();
-			avg.beacon2 /= avg_readings.size();
-			avg.pressed = n_pressed > avg_readings.size() / 2;
+		} else {
+			avg_readings.push_back(*res);
+			if (avg_readings.size() >= state.oversampling) {
+				Reading avg = {};
+				size_t n_pressed = 0;
+				for (auto& x : avg_readings) {
+					for (size_t i = 0; i < N_Beacons; ++i) avg.beacons[i] += x.beacons[i];
+					n_pressed += (x.pressed ? 1 : 0);
+				}
 
-			avg_readings.clear();
+				for (size_t i = 0; i < N_Beacons; ++i) avg.beacons[i] /= avg_readings.size();
+				avg.pressed = n_pressed > avg_readings.size() / 2;
 
-			state.readings.push_back(avg);
+				avg_readings.clear();
+
+				state.readings.push_back(avg);
+			}
 		}
-
+		res = read_mail(state);
 	}
+
 	if (sf::Keyboard::isKeyPressed(sf::Keyboard::R)) state.readings.clear();
 }
 
@@ -190,7 +210,16 @@ void render(State& state) noexcept {
 		render_plot(state.readings);
 	}
 
-	if (ImGui::Button("Clear")) state.readings.clear();
+	if (ImGui::Button("Clear")) {
+		state.readings.clear();
+		// for (auto& x : state.beacons) {
+		// 	x.calibration_sample = 0;
+		// 	x.sum_sample = {};
+		// }
+	}
+
+	ImGui::Checkbox("Calibrating", &state.calibrating);
+
 
 	ImGui::End();
 
@@ -201,28 +230,94 @@ void render(State& state) noexcept {
 
 	for (size_t i = 0; i < state.n_beacons_placed; ++i) {
 		shape.setPosition(
-			state.beacons[i].x - shape.getRadius(), state.beacons[i].y - shape.getRadius()
+			state.beacons[i].pos.x - shape.getRadius(), state.beacons[i].pos.y - shape.getRadius()
 		);
 		shape.setFillColor({255, 0, 0, 255});
 		state.renderTarget->draw(shape);
 	}
 
-	for (size_t i = 0; i + 1 < state.readings.size(); ++i) {
-		auto curr = state.readings[i];
-		auto next = state.readings[i + 1];
-		if (!next.pressed) continue;
+	const std::uint32_t Distinct_Colors[8] = {
+		0x6969FF,
+		0x22FF22,
+		0xFF0000,
+		0xFFFF00,
+		0x483dFF,
+		0x00FFFF,
+		0x0000FF,
+		0xFF00FF
+	};
 
-		sf::Vertex line[] = {
-			sf::Vertex(triangulate(state, curr)),
-			sf::Vertex(triangulate(state, next))
-		};
+	constexpr auto N_Combi = (N_Beacons * (N_Beacons - 1)) / 2;
+	static std::vector<std::array<sf::Vector2f, N_Combi>> lines;
 
-		state.renderTarget->draw(line, 2, sf::Lines);
+	std::array<sf::Vector2f, N_Combi> default_set;
+	for (size_t i = 0; i < N_Beacons; ++i) default_set[i] = { NAN, NAN };
+
+	lines.clear();
+	lines.resize(state.readings.size(), default_set);
+
+	size_t bn = 0;
+	for (size_t bi = 0; bi < N_Beacons; ++bi) for (size_t bj = bi + 1; bj < N_Beacons; ++bj, ++bn) {
+		std::optional<sf::Vector2f> last;
+		if (state.readings.size() > 0) last = triangulate(state, state.readings.front(), bi, bj);
+
+		if (last) lines[0][bn] = *last;
+
+		for (size_t i = 1; i < state.readings.size(); ++i) {
+			auto next = triangulate(state, state.readings[i], bi, bj);
+
+			if (!next) continue;
+			if (!last) { last = next; continue; }
+
+			auto color = sf::Color(Distinct_Colors[bn % 8]);
+			sf::Vertex line[] = { sf::Vertex(*last, color), sf::Vertex(*next, color)};
+			state.renderTarget->draw(line, 2, sf::Lines);
+
+			last = next;
+			lines[i][bn] = *next;
+		}
 	}
 
-	if (state.n_beacons_placed >= 2) {
-		sf::Vector2f b1 = state.beacons[0];
-		sf::Vector2f b2 = state.beacons[1];
+	for (size_t i = 0; i < N_Combi; ++i) {
+		for (size_t x = 1; x < lines.size(); ++x) if (lines[x][i].x == NAN) {
+			sf::Vector2f start = lines[x][i];
+
+			size_t n = 0;
+			for (; x + n < lines.size() && lines[x + n][i].x == NAN; ++n);
+
+			if (x + n == lines.size()) {
+				for (; x < lines.size(); ++x) lines[x][i] = start;
+				continue;
+			}
+
+			sf::Vector2f end = lines[x + n][i];
+
+			for (size_t j = 0; j < n; ++j) {
+				lines[x + j][i].x = start.x + n * (end.x - start.x) / (j + 1.f);
+				lines[x + j][i].y = start.y + n * (end.y - start.y) / (j + 1.f);
+			}
+		}
+	}
+
+	for (size_t i = 0; i + 1 < lines.size(); ++i) {
+		sf::Vector2f curr = {};
+		for (auto& x : lines[i]) curr += x;
+		curr.x /= N_Combi;
+		curr.y /= N_Combi;
+
+		sf::Vector2f next = {};
+		for (auto& x : lines[i + 1]) next += x;
+		next.x /= N_Combi;
+		next.y /= N_Combi;
+
+		sf::Vertex l[] = { sf::Vertex(curr), sf::Vertex(next) };
+		state.renderTarget->draw(l, 2, sf::Lines);
+	}
+
+
+	if (state.n_beacons_placed >= N_Beacons) {
+		sf::Vector2f b1 = state.beacons[0].pos;
+		sf::Vector2f b2 = state.beacons[1].pos;
 
 		double dt_beacons = (b1.x - b2.x) * (b1.x - b2.x) + (b1.y - b2.y) * (b1.y - b2.y);
 		dt_beacons = std::sqrt(dt_beacons);
@@ -230,8 +325,8 @@ void render(State& state) noexcept {
 			(dt_beacons * state.info_distance / state.beacon_distance) / 2
 		);
 		shape.setPosition(
-			(state.beacons[0].x + state.beacons[1].x) / 2 - shape.getRadius(),
-			(state.beacons[0].y + state.beacons[1].y) / 2 - shape.getRadius()
+			(state.beacons[0].pos.x + state.beacons[1].pos.x) / 2 - shape.getRadius(),
+			(state.beacons[0].pos.y + state.beacons[1].pos.y) / 2 - shape.getRadius()
 		);
 		shape.setFillColor({0, 0, 0, 0});
 		shape.setOutlineColor({255, 255, 255, 255});
@@ -248,40 +343,39 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	static std::vector<const float*> ys;
 	static size_t N_Samples = 10000;
 
-	static const char* names[2] = {
-		"Beacon 1",
-		"Beacon 2"
-	};
+	static std::array<char*, N_Beacons> names = { nullptr };
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		free(names[i]);
+		names[i] = (char*)malloc(sizeof("Beacons XXXXXXX"));
+		sprintf(names[i], "Beacon %d", (int)i);
+	}
 
 	lines.clear();
 	ys.clear();
 
-	lines.resize(2);
+	lines.resize(N_Beacons);
 
-	float max1 = 0;
-	float max2 = 0;
+	float maxs[N_Beacons];
 	size_t n = readings.size();
-	for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
-		auto& [a, _, __] = readings[i];
-		lines[0].push_back((float)a);
-		max1 = (float)(a > max1 ? a : max1);
-	}
-	for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
-		auto& [_, b, __] = readings[i];
-		lines[1].push_back((float)b);
-		max2 = (float)(b > max2 ? b : max2);
+
+	for (size_t j = 0; j < N_Beacons; ++j) {
+		for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
+			auto& a = readings[i].beacons[j];
+			lines[j].push_back((float)a);
+			maxs[j] = (float)(a > maxs[j] ? a : maxs[j]);
+		}
 	}
 
-	ys.push_back(lines[0].data());
-	ys.push_back(lines[1].data());
+	for (size_t i = 0; i < N_Beacons; ++i) ys.push_back(lines[i].data());
 
 	ImGui::PlotConfig conf;
 	conf.values.ys_list = ys.data();
-	conf.values.ys_count = 2;
+	conf.values.ys_count = N_Beacons;
 	conf.values.count = (int)std::min(readings.size(), N_Samples);
 
 	conf.scale.min = 0;
-	conf.scale.max = 1.1f * (max1 > max2 ? max1 : max2);
+	for (auto& x : maxs) conf.scale.max = std::max(conf.scale.max, x);
+	conf.scale.max *= 1.1f;
 
 	conf.tooltip.show = true;
 
@@ -293,26 +387,20 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 
 	conf.frame_size = { ImGui::GetWindowWidth() * 0.95f, 100 };
 
-	conf.tooltip.ys_names = names;
+	conf.tooltip.ys_names = names.data();
 	conf.tooltip.format = "%s, %g: % 12.9f";
 
 	ImGui::Plot("Readings", conf);
 
-	conf.values.ys_list = ys.data();
-	conf.values.ys_count = 1;
-	conf.scale.max = 1.1f * max1;
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		conf.values.ys_list = ys.data() + i;
+		conf.values.ys_count = 1;
+		conf.scale.max = 1.1f * maxs[i];
 
-	conf.grid_y.size = conf.scale.max / 5;
+		conf.grid_y.size = conf.scale.max / 5;
 
-	ImGui::Plot("Reading 1", conf);
-
-	conf.values.ys_list = ys.data() + 1;
-	conf.values.ys_count = 1;
-	conf.scale.max = 1.1f * max2;
-
-	conf.grid_y.size = conf.scale.max / 5;
-
-	ImGui::Plot("Reading 2", conf);
+		ImGui::Plot(names[i], conf);
+	}
 
 	ImGui::SliderSize("#Samples", &N_Samples, 10, 1000);
 }
@@ -328,7 +416,7 @@ double B(double M, sf::Vector2f r) noexcept {
 }
 
 void make_slot(State& state) noexcept {
-	state.mail_slot = CreateMailslotA(Mail_Name, 0, MAILSLOT_WAIT_FOREVER, nullptr);
+	state.mail_slot = CreateMailslotA(Mail_Name, 0, 1, nullptr);
 
 	if (state.mail_slot == INVALID_HANDLE_VALUE) {
 		fprintf(stderr, "Error creating mail slot\n");
@@ -337,78 +425,21 @@ void make_slot(State& state) noexcept {
 }
 
 std::optional<Reading> read_mail(State& state) noexcept {
-	DWORD cbMessage = 0;
-	DWORD cMessage = 0;
 	DWORD cbRead = 0; 
-    BOOL fResult; 
-    LPTSTR lpszBuffer; 
-    TCHAR achID[80]; 
-    DWORD cAllMessages; 
-    OVERLAPPED ov;
+	BOOL fResult; 
 
-    HANDLE hEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("SP_Event"));
-    if (!hEvent) return std::nullopt;
+	Reading result;
 
-    ov.Offset = 0;
-    ov.OffsetHigh = 0;
-    ov.hEvent = hEvent;
+	fResult = ReadFile(state.mail_slot, &result, sizeof(result), &cbRead, nullptr);
 
-    fResult = GetMailslotInfo(
-    	state.mail_slot, // mailslot handle 
-    	nullptr,
-        &cbMessage,                   // size of next message 
-        &cMessage,                    // number of messages 
-        nullptr
-    );              // no read time-out 
- 
-    if (!fResult) {
-        fprintf(stderr, "GetMailslotInfo failed with %d.\n", (int)GetLastError()); 
-        return std::nullopt;
-    }
+	if (cbRead < sizeof(Reading)) return std::nullopt;
 
-    if (cbMessage == MAILSLOT_NO_MESSAGE) {
-        return std::nullopt;
-    } 
+	if (!fResult) {
+		fprintf(stderr, "ReadFile failed with %d.\n", (int)GetLastError());
+		return std::nullopt;
+	}
 
-    cAllMessages = cMessage;
-
-    // Allocate memory for the message.
-
-    lpszBuffer = (LPTSTR)GlobalAlloc(GPTR, lstrlen((LPTSTR) achID) * sizeof(TCHAR) + cbMessage);
-
-    if(!lpszBuffer) return std::nullopt;
-
-    lpszBuffer[0] = '\0'; 
-
-    fResult = ReadFile(state.mail_slot, lpszBuffer, cbMessage, &cbRead, &ov);
-
-    if (!fResult) {
-        fprintf(stderr, "ReadFile failed with %d.\n", (int)GetLastError());
-        GlobalFree((HGLOBAL) lpszBuffer);
-        return std::nullopt;
-    }
-
-    // Concatenate the message and the message-number string. 
-
-
-    GlobalFree((HGLOBAL) lpszBuffer); 
-
-    fResult = GetMailslotInfo(
-    	state.mail_slot,              // mailslot handle 
-        (LPDWORD) NULL,               // no maximum message size 
-        &cbMessage,                   // size of next message 
-        &cMessage,                    // number of messages 
-        (LPDWORD) NULL                // no read time-out
-    );
-
-    if (!fResult) {
-        fprintf(stderr, "GetMailslotInfo failed (%d)\n", (int)GetLastError());
-        return std::nullopt;
-    }
-
-    CloseHandle(hEvent);
-
-    return *reinterpret_cast<Reading*>(lpszBuffer);
+	return result;
 }
 
 std::optional<sf::Vector2f> circle_circle_intersection(
@@ -466,29 +497,38 @@ std::optional<sf::Vector2f> circle_circle_intersection(
     };
 }
 
-sf::Vector2f triangulate(State& state, Reading r) noexcept {
+std::optional<sf::Vector2f> triangulate(State& state, Reading r, size_t i, size_t j) noexcept {
 	constexpr double u0 = 1.225663753e-6;
 	constexpr double PI = 3.141592653589793238462643383279502884;
 
 	if (state.n_beacons_placed < 2) return {};
 
-	sf::Vector2f b1 = state.beacons[0];
-	sf::Vector2f b2 = state.beacons[1];
+	sf::Vector2f b1 = state.beacons[i].pos;
+	sf::Vector2f b2 = state.beacons[j].pos;
 
 	double dt_beacons = (b1.x - b2.x) * (b1.x - b2.x) + (b1.y - b2.y) * (b1.y - b2.y);
 
 	dt_beacons = std::sqrt(dt_beacons);
 
-	double d1 = state.magnet_strength * u0 / (4 * PI * r.beacon1);
+	double base_strength1 = state.beacons[i].sum_sample.x / state.beacons[i].calibration_sample;
+	double strength1 = r.beacons[i] - base_strength1;
+
+	double base_strength2 = state.beacons[j].sum_sample.x / state.beacons[j].calibration_sample;
+	double strength2 = r.beacons[j] - base_strength2;
+
+	double d1 = state.magnet_strength * u0 / (4 * PI * strength1);
+	if (d1 < 0) return {};
 	d1 = std::pow(d1, 1.0 / 3.0);
 	d1 = dt_beacons * d1 / state.beacon_distance;
 
-	double d2 = state.magnet_strength * u0 / (4 * PI * r.beacon2);
+	double d2 = state.magnet_strength * u0 / (4 * PI * strength2);
+	if (d2 < 0) return {};
 	d2 = std::pow(d2, 1.0 / 3.0);
 	d2 = dt_beacons * d2 / state.beacon_distance;
 
-	auto res = *circle_circle_intersection(b1, d1, b2, d2);
-	return res;
+	auto res = circle_circle_intersection(b1, d1, b2, d2);
+	if (!res) return {};
+	return *res;
 }
 
 

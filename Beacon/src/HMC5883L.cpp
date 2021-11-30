@@ -27,11 +27,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Wire.h>
 
 #include "HMC5883L.h"
+extern void serial_printf(const char *fmt, ...);
 
 bool HMC5883L::begin()
 {
     Wire.begin();
 
+    // auto A = fastRegister8(HMC5883L_REG_IDENT_A);
+    // auto B = fastRegister8(HMC5883L_REG_IDENT_B);
+    // auto C = fastRegister8(HMC5883L_REG_IDENT_C);
+
+    // serial_printf("%d, %d, %d\n", A, B, C);
     if ((fastRegister8(HMC5883L_REG_IDENT_A) != 0x48)
     || (fastRegister8(HMC5883L_REG_IDENT_B) != 0x34)
     || (fastRegister8(HMC5883L_REG_IDENT_C) != 0x33))
