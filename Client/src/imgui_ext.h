@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "imgui.h"
@@ -33,6 +34,20 @@ namespace ImGui {
 		int x = (int)*v;
 		bool ret = ImGui::SliderInt(label, &x, (int)min, (int)max, format);
 		*v = x;
+		return ret;
+	}
+
+
+	static bool SliderAngled(
+		const char* label,
+		double* v_rad,
+		double v_degrees_min,
+		double v_degrees_max,
+		const char* format = "%.0f deg"
+	) {
+		float x = *v_rad;
+		bool ret = ImGui::SliderAngle(label, &x, v_degrees_min, v_degrees_max, format);
+		*v_rad = x;
 		return ret;
 	}
 

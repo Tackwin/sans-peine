@@ -195,17 +195,21 @@ double volt_to_tesla(double volt) noexcept {
 }
 
 double mmag_to_tesla(float mag) noexcept {
-	return (1 / 1'000'000.0) * mag / 1'000.0;
+	return (1 / 1'000'000.0) * mag / 10.0;
 }
 
 int32_t read_int32(const std::vector<std::uint8_t>& buf, size_t i) noexcept {
 	return *reinterpret_cast<const int32_t*>(buf.data() + i);
 }
 
+struct Vector3d {
+	double x, y, z;
+};
+
 #pragma pack(1)
 struct Reading {
-	static constexpr size_t N_Beacons = 3;
-	double beacons[N_Beacons];
+	static constexpr size_t N_Beacons = 4;
+	Vector3d beacons[N_Beacons];
 	bool pressed;
 };
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
@@ -339,7 +343,9 @@ int main(int argc, char** argv) {
 			double t = std::hypot(tx, ty, tz);
 
 			reading_ready[in.id] = true;
-			r.beacons[in.id] = t;
+			r.beacons[in.id].x = tx;
+			r.beacons[in.id].y = ty;
+			r.beacons[in.id].z = tz;
 
 			if (memchr(reading_ready, 0, Reading::N_Beacons) == NULL) {
 				r.pressed = true;
@@ -348,12 +354,12 @@ int main(int argc, char** argv) {
 			}
 
 			printf(
-				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z) % 10.4lf\n",
+				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z) % 10.9lf\n",
 				(int)in.id,
 				in.x,
 				in.y,
 				in.z,
-				std::sqrt(in.x * in.x + in.y * in.y + in.z * in.z)
+				t
 			);
 
 #endif

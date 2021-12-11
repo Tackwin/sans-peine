@@ -3,6 +3,18 @@
 #include "HMC5883L.h"
 #include "TCA9548.h"
 
+// HMC5883L
+// 2 mG RMS
+// 75 hz
+// High availability, bad perf
+
+// MMC5983MA
+// 0.4/0.6/0.8/1.2 mG RMS
+// 50/100/225/580 hz
+
+
+
+
 constexpr auto N_Sync_Seq = 32;
 
 void serial_printf(const char *fmt, ...) {
@@ -21,12 +33,13 @@ void use_bus(uint8_t bus) noexcept {
 	Wire.endTransmission();
 }
 
-constexpr size_t N_Beacons = 8;
+constexpr size_t N_Beacons = 4;
 HMC5883L beacons[N_Beacons];
 bool healthy[N_Beacons] = { false };
 
 TCA9548 multiplexer(0x70);
-size_t BUS_MAP[] = {0, 1, 2, 3, 4, 5, 6, 7};
+size_t BUS_MAP[] = {7, 6, 5, 4, 3, 5, 6, 7};
+
 
 void setup() {
 	Wire.setWireTimeout(1000);
@@ -57,7 +70,7 @@ void setup() {
 		serial_printf(".");
 		beacons[i].setSamples(HMC5883L_SAMPLES_1);
 		serial_printf(".");
-		beacons[i].setRange(HMC5883L_RANGE_1_3GA);
+		beacons[i].setRange(HMC5883L_RANGE_2_5GA);
 		serial_printf(".");
 		beacons[i].setDataRate(HMC5883L_DATARATE_75HZ);
 		serial_printf(".\n");
