@@ -29,6 +29,13 @@ void upload_field_texture(State& state, Vector3d readings) noexcept;
 int main(int, char**) {
 	State state;
 	make_slot(state);
+	state.probability_grid = (double*)malloc(
+		(size_t)(state.probability_space_size / state.probability_resolution) *
+		(size_t)(state.probability_space_size / state.probability_resolution) *
+		sizeof(double)
+	);
+	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_dist_beacon[i] = true;
+	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_angle_beacon[i] = true;
 
 	state.context_settings.antialiasingLevel = 8;
 	sf::RenderWindow window(
@@ -107,6 +114,8 @@ int main(int, char**) {
 	}
 
 	ImGui::SFML::Shutdown();
+
+	free(state.probability_grid);
 	
 	return 0;
 }
@@ -132,8 +141,32 @@ void update(State& state) noexcept {
 
 		if (state.gui.calibrating) {
 			for (size_t i = 0; i < N_Beacons; ++i) {
-				state.beacons[i].calibration_sample++;
-				state.beacons[i].sum_sample += res->beacons[i];
+				auto& b = state.beacons[i];
+
+				b.calibration_sample++;
+				b.sum_sample += res->beacons[i];
+				b.sum_dist += std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z);
+				b.sum2_sample.x += res->beacons[i].x * res->beacons[i].x;
+				b.sum2_sample.y += res->beacons[i].y * res->beacons[i].y;
+				b.sum2_sample.z += res->beacons[i].z * res->beacons[i].z;
+
+				b.sum2_dist +=
+					std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z) *
+					std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z);
+
+				b.mean.x = b.sum_sample.x / b.calibration_sample;
+				b.mean.y = b.sum_sample.y / b.calibration_sample;
+				b.mean.z = b.sum_sample.z / b.calibration_sample;
+
+				auto n = b.calibration_sample;
+				b.std.x = b.sum2_sample.x / n - (b.sum_sample.x * b.sum_sample.x) / (n * n);
+				b.std.y = b.sum2_sample.y / n - (b.sum_sample.y * b.sum_sample.y) / (n * n);
+				b.std.z = b.sum2_sample.z / n - (b.sum_sample.z * b.sum_sample.z) / (n * n);
+
+				auto f = n / (n - 1.0);
+				b.std.x = std::sqrt(b.std.x * f);
+				b.std.y = std::sqrt(b.std.y * f);
+				b.std.z = std::sqrt(b.std.z * f);
 			}
 		} else {
 			avg_readings.push_back(*res);
@@ -178,9 +211,23 @@ void update(State& state) noexcept {
 	}
 
 	state.gui.sample_to_display = std::min(state.gui.sample_to_display, state.readings.size());
+
+	compute_probability_grid(state);
 }
 
 void render(State& state) noexcept {
+	update_probability_texture(state);
+
+	sf::Sprite probability_sprite;
+	probability_sprite.setTexture(state.probability_texture);
+	probability_sprite.setOrigin(state.probability_texture.getSize().x / 2, state.probability_texture.getSize().y / 2);
+	probability_sprite.setPosition(0, 0);
+	probability_sprite.setScale(
+		state.probability_space_size / state.probability_texture.getSize().x,
+		state.probability_space_size / state.probability_texture.getSize().y
+	);
+	state.renderTarget->draw(probability_sprite);
+
 	for (float x = -state.zoom_level; x <= state.zoom_level; x += state.gui.grid) {
 		float xx = std::round(x / state.gui.grid) * state.gui.grid;
 		
@@ -212,8 +259,7 @@ void render(State& state) noexcept {
 		state.renderTarget->draw(shape);
 	}
 
-
-	render_triangulation(state);
+	// render_triangulation(state);
 }
 
 void make_slot(State& state) noexcept {

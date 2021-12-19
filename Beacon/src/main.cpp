@@ -33,12 +33,12 @@ void use_bus(uint8_t bus) noexcept {
 	Wire.endTransmission();
 }
 
-constexpr size_t N_Beacons = 4;
+constexpr size_t N_Beacons = 6;
 HMC5883L beacons[N_Beacons];
 bool healthy[N_Beacons] = { false };
 
 TCA9548 multiplexer(0x70);
-size_t BUS_MAP[] = {7, 6, 5, 4, 3, 5, 6, 7};
+size_t BUS_MAP[] = {7, 6, 5, 4, 3, 2, 6, 7};
 
 
 void setup() {

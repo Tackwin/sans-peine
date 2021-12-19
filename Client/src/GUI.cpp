@@ -42,6 +42,7 @@ void render(State& state, GUI_State& gui_state) noexcept {
 
 	ImGui::SliderDouble("Power", &gui_state.power, 0, 10);
 	ImGui::SliderDouble("Magnet Strength", &gui_state.magnet_strength, 0, 100, "%.7f", 6);
+	ImGui::SliderDouble("Magnet Height", &gui_state.magnet_height, 0, 0.10);
 	ImGui::SliderSize("Oversampling", &gui_state.oversampling, 1, 100);
 
 	ImGui::Checkbox("Live", &gui_state.sample_live);
@@ -55,8 +56,10 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	if (ImGui::Button("Default placement")) {
 		state.n_beacons_placed = 0;
 		for (size_t n = 0; n < N_Beacons; ++n) {
-			state.beacons[state.n_beacons_placed].pos.x = 0;
-			state.beacons[state.n_beacons_placed].pos.y = -0.04f * n - 0.02f * N_Beacons;
+			auto t = 0.5 - n / (N_Beacons - 1.0);
+
+			state.beacons[state.n_beacons_placed].pos.x = std::get<0>(Beacons_Pos[n]);
+			state.beacons[state.n_beacons_placed].pos.y = std::get<1>(Beacons_Pos[n]);
 			state.beacons[state.n_beacons_placed].calibration_sample = 0;
 			state.beacons[state.n_beacons_placed].sum_sample = {};
 			state.n_beacons_placed++;
@@ -86,6 +89,33 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		}
 		ImGui::NewLine();
 	}
+	ImGui::PopID();
+
+	thread_local char temp_buffer[256];
+	ImGui::PushID("Selection measures");
+	thread_local bool all_dist = true;
+	thread_local bool all_angle = true;
+
+	ImGui::PushID("Dist");
+	if (ImGui::Checkbox("All Distance", &all_dist))
+		for (auto& x : gui_state.use_dist_beacon) x = all_dist;
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		ImGui::SameLine();
+		sprintf(temp_buffer, "%d", i);
+		ImGui::Checkbox(temp_buffer, &gui_state.use_dist_beacon[i]);
+	}
+	ImGui::PopID();
+
+	ImGui::PushID("Angle");
+	if (ImGui::Checkbox("All Angle", &all_angle))
+		for (auto& x : gui_state.use_angle_beacon) x = all_angle;
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		ImGui::SameLine();
+		sprintf(temp_buffer, "%d", i);
+		ImGui::Checkbox(temp_buffer, &gui_state.use_angle_beacon[i]);
+	}
+	ImGui::PopID();
+
 	ImGui::PopID();
 
 	for (size_t i = 0; i < N_Beacons; ++i) for (size_t j = 0; j <= i; j++) {

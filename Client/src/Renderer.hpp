@@ -48,7 +48,13 @@ struct Beacon {
 	sf::Vector2f pos;
 
 	Vector3d sum_sample = {};
+	Vector3d sum2_sample = {};
+	double sum_dist = 0;
+	double sum2_dist = 0;
+
 	size_t calibration_sample = 0;
+	Vector3d mean;
+	Vector3d std;
 };
 #pragma pack(pop)
 
@@ -75,6 +81,12 @@ struct State {
 	size_t next_reading = 0;
 
 	GUI_State gui;
+
+	sf::Texture probability_texture;
+	double* probability_grid = nullptr;
+	double probability_resolution = 0.005;
+	double probability_space_size = 1;
 };
 
 extern void render_triangulation(State& state) noexcept;
+extern void update_probability_texture(State& state) noexcept;

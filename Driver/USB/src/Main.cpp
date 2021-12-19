@@ -1,3 +1,4 @@
+
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -208,7 +209,7 @@ struct Vector3d {
 
 #pragma pack(1)
 struct Reading {
-	static constexpr size_t N_Beacons = 4;
+	static constexpr size_t N_Beacons = 6;
 	Vector3d beacons[N_Beacons];
 	bool pressed;
 };

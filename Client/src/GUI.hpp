@@ -10,6 +10,7 @@ struct GUI_State {
 	sf::Color grid_color = sf::Color(10, 10, 10);
 
 	double magnet_strength = 1;
+	double magnet_height = 0.06;
 
 	size_t oversampling = 1;
 	bool calibrating = false;
@@ -29,7 +30,10 @@ struct GUI_State {
 	sf::Texture field_texture;
 
 	size_t sample_to_display = 0;
-	bool sample_live = false;
+	bool sample_live = true;
+
+	bool use_dist_beacon[N_Beacons];
+	bool use_angle_beacon[N_Beacons];
 };
 
 struct State;

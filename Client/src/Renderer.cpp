@@ -293,3 +293,42 @@ sf::Vector2f line_line(
 
 	return { p0_x + (t * s1_x), p0_y + (t * s1_y) };
 }
+
+void update_probability_texture(State& state) noexcept {
+	static sf::Image probability_image;
+	auto w = (size_t)(state.probability_space_size / state.probability_resolution);
+	auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+	probability_image.create(w, h);
+
+	double log_max = -INFINITY;
+	double log_min = +INFINITY;
+
+	auto scale = [] (double x) -> double {
+		return std::pow(x, 1/3.0);
+	};
+	auto cmap = [] (double x) -> sf::Color {
+		auto c = (sf::Uint8)(x * 255);
+		auto [r, g, b] = Viridis_Color_Map[c];
+		return {
+			(sf::Uint8)(r * 255),
+			(sf::Uint8)(g * 255),
+			(sf::Uint8)(b * 255),
+			255
+		};
+	};
+
+	for (size_t x = 0; x < probability_image.getSize().x; ++x)
+	for (size_t y = 0; y < probability_image.getSize().y; ++y) {
+		auto it = scale(state.probability_grid[x + y * w]);
+		if (log_max < it) log_max = it;
+		if (log_min > it) log_min = it;
+	}
+	for (size_t x = 0; x < probability_image.getSize().x; ++x)
+	for (size_t y = 0; y < probability_image.getSize().y; ++y) {
+		auto it = scale(state.probability_grid[x + y * w]);
+		auto t = (it - log_min) / (log_max - log_min);
+		probability_image.setPixel(x, probability_image.getSize().y - y - 1, cmap(t));
+	}
+
+	state.probability_texture.loadFromImage(probability_image);
+}

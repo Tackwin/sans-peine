@@ -1,5 +1,6 @@
 #include "Physics.hpp"
 #include <cmath>
+#include "Renderer.hpp"
 
 extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 	double h = state.h;
@@ -148,4 +149,159 @@ extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 	result.resolution = state.resolution;
 
 	return result;
+}
+
+void compute_probability_grid(State& state) noexcept {
+	constexpr double u0 = 1.225663753e-6;
+	constexpr double PI = 3.141592653589793238462643383279502884;
+
+
+	if (state.readings.size() < 2) return;
+	auto to_draw = state.gui.sample_live ? state.readings.size() : state.gui.sample_to_display;
+	auto read = state.readings[to_draw - 1];
+
+	auto w = (size_t)(state.probability_space_size / state.probability_resolution);
+	auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+
+	auto N = [] (double x, double u, double s) -> double {
+		return std::exp(-0.5 * ((x - u) / s) * ((x - u) / s)) / (s * std::sqrt(2 * PI));
+	};
+
+	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 1;
+
+	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.gui.use_dist_beacon[b_idx]) {
+		auto& b = state.beacons[b_idx];
+		auto n = b.calibration_sample;
+
+		auto s = std::sqrt((b.sum2_dist / n - (b.sum_dist / n) * (b.sum_dist / n)) * (n / (n - 1.0)));
+		s *= 100;
+		auto u = b.sum_dist / n;
+
+		u = std::hypot(read.beacons[b_idx].x, read.beacons[b_idx].y, read.beacons[b_idx].z) - u;
+		u = std::abs(u);
+		
+		for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+			auto px = xi / (w - 1.0) - 0.5;
+			auto py = yi / (h - 1.0) - 0.5;
+
+			px *= state.probability_space_size * 1;
+			py *= state.probability_space_size * 1;
+
+			px -= b.pos.x;
+			py -= b.pos.y;
+
+			auto d = std::hypot(px, py, state.gui.magnet_height / 2);
+			auto c = state.gui.magnet_strength * u0 / (4 * PI);
+
+			auto p = N(c / (d * d *d), u, s) * 3 * c / (d * d * d *d);
+			state.probability_grid[xi + yi * w] *= p;
+		}
+	}
+
+	auto Q1 = [&] (double u) -> double { return std::sqrt(PI) / 2.0 * std::erfc(u); };
+	auto Q2 = [&] (double x, double y, double p) -> double {
+		auto delta = (x >= 0 && y >= 0) ? 0 : 0.5;
+
+		auto help = [&] (double x, double p) -> double {
+			auto Q = [&] (double x, double p) -> double {
+				auto res = 0;
+				res += std::sqrt(1 - p * p) / 12 * Q1(x / std::sqrt(1 - p * p));
+
+				res +=
+					0.25 *
+					std::sqrt((3 - 3 * p * p) / (3 + p * p)) *
+					Q1(x * std::sqrt((3 + p * p) / (3 - 3 * p * p)));
+
+				return res;
+			};
+
+			if (x < 0) {
+				if (p < 0) return 0.5 - (Q1(-x) - Q(-x, p));
+				return 0.5 - Q(-x, -p);
+			} else {
+				if (p < 0) return Q(x, p);
+				return Q1(x) - Q(x, -p);
+			}
+		};
+
+		auto signx = x >= 0 ? 1 : -1;
+		auto signy = y >= 0 ? 1 : -1;
+		auto px = signx * (p * x - y) / std::sqrt(x*x - 2 * p * x * y + y * y);
+		auto py = signy * (p * y - x) / std::sqrt(x*x - 2 * p * x * y + y * y);
+
+
+		return help(x, px) + help(y, py) - delta;
+	};
+
+	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.gui.use_angle_beacon[b_idx]) {
+		auto& b = state.beacons[b_idx];
+		auto n = b.calibration_sample;
+
+		auto sx = 0.50;
+		auto sy = 0.50;
+
+		auto sx2 = sx*sx;
+		auto sy2 = sy*sy;
+
+		auto ux = read.beacons[b_idx].x - b.mean.x;
+		auto uy = read.beacons[b_idx].y - b.mean.y;
+
+		auto maxu = std::max(ux, uy);
+		ux /= maxu;
+		uy /= maxu;
+
+		for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+			auto px = xi / (w - 1.0) - 0.5;
+			auto py = yi / (h - 1.0) - 0.5;
+
+			px *= state.probability_space_size * 1;
+			py *= state.probability_space_size * 1;
+
+			px -= b.pos.x;
+			py -= b.pos.y;
+
+			// auto z = px >= 0 ? std::atan(py / px) : PI + std::atan(py / px);
+			auto z = std::atan(py / px);
+			
+
+#if 0
+			auto l = (sy / std::tan(z) - sx) / -(2 * sx * sy);
+
+			auto p = 1;
+			p *= 1.0 / (std::cos(z) * std::tan(z) * std::cos(z) * std::tan(z));
+			p *= 1.0 / (2 * PI * sx * sy);
+			p *= std::exp(l * uy) * (w / l - 1.0 / (l * l));
+#elif 0
+
+			auto sign = z >= 0 ? 1 : -1;
+		
+
+			auto pxy = 0; // maybe check that this assumption is true (X, Y) independant
+			auto uv1 = -sign * ux * std::sin(z) + sign * uy * std::cos(z);
+			auto sv1 = std::sqrt(
+				sx * sx * std::sin(z) * std::sin(z) +
+				sy * sy * std::cos(z) * std::cos(z) -
+				pxy * sx * sy * std::sin(2 * z)
+			);
+
+			auto pvy = sign * sy * std::cos(z) - sign * pxy * sx * std::sin(z) / sv1;
+
+			auto p = (1 + sign) / 2 * Q1(uy / sy);
+			p += Q2(sign * uv1 / sv1, -sign * uy / sy, -pvy);
+#elif 1
+			auto tz = std::tan(z);
+
+			auto d = 2 * sx2 * sy2;
+			auto a = (sy2 + sx2 * tz * tz) / d;
+			auto b = -(-2 * sy2 * ux - 2 * sx2 * tz * uy) / d;
+			auto c = -(ux*ux * sy2 + sx2 * uy*uy) / d;
+
+			auto f = 1.0 / (std::cos(z) * std::cos(z));
+			f /= sx*sy*2*PI;
+
+			auto p = f * std::sqrt(PI) * b / (2 * std::pow(a, 1.5)) * std::exp(b*b / (4*a) + c);
+#endif
+			state.probability_grid[xi + yi * w] *= p;
+		}
+	}
 }

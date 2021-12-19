@@ -20,4 +20,7 @@ struct Simulation_Parameters {
 	double magnet_strength = 4.875;
 };
 
+
+struct State;
 extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept;
+extern void compute_probability_grid(State& state) noexcept;
