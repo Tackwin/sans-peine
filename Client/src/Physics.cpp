@@ -1,6 +1,7 @@
 #include "Physics.hpp"
 #include <cmath>
 #include "Renderer.hpp"
+#include <cmath>
 
 extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 	double h = state.h;
@@ -167,6 +168,32 @@ void compute_probability_grid(State& state) noexcept {
 		return std::exp(-0.5 * ((x - u) / s) * ((x - u) / s)) / (s * std::sqrt(2 * PI));
 	};
 
+
+	auto I = [] (double x, double a) -> double {
+		double res = 0.0;
+		double nomi = x*x/4;
+		double current_nomi = 1.0;
+
+		double denomi = 1;
+
+		for (size_t j = 0; j < 5; ++j) {
+			res += current_nomi / (denomi * std::tgamma(a + j + 1));
+
+			current_nomi *= nomi;
+			denomi *= (j + 1);
+		}
+
+		return res * std::pow(x / 2, a);
+	};
+
+	auto QI = [I] (double x, double lambda, double k) -> double {
+		return
+			1/2.0 *
+			std::exp(-(x + lambda) / 2) *
+			std::pow(x / lambda, k / 4 - 0.5) *
+			I(std::sqrt(lambda * x), k / 2 - 1);
+	};
+
 	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 1;
 
 	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.gui.use_dist_beacon[b_idx]) {
@@ -191,9 +218,13 @@ void compute_probability_grid(State& state) noexcept {
 			py -= b.pos.y;
 
 			auto d = std::hypot(px, py, state.gui.magnet_height / 2);
+			auto lambda = 0.0;
+			lambda += (read.beacons[b_idx].x / b.std.x) * (read.beacons[b_idx].x / b.std.x);
+			lambda += (read.beacons[b_idx].y / b.std.y) * (read.beacons[b_idx].y / b.std.y);
+
 			auto c = state.gui.magnet_strength * u0 / (4 * PI);
 
-			auto p = N(c / (d * d *d), u, s) * 3 * c / (d * d * d *d);
+			auto p = N(c / (d * d * d), u, s) * 3 * c / (d * d * d *d);
 			state.probability_grid[xi + yi * w] *= p;
 		}
 	}
@@ -237,18 +268,14 @@ void compute_probability_grid(State& state) noexcept {
 		auto& b = state.beacons[b_idx];
 		auto n = b.calibration_sample;
 
-		auto sx = 0.50;
-		auto sy = 0.50;
+		auto sx = b.std.x * 100;
+		auto sy = b.std.x * 100;
 
 		auto sx2 = sx*sx;
 		auto sy2 = sy*sy;
 
 		auto ux = read.beacons[b_idx].x - b.mean.x;
 		auto uy = read.beacons[b_idx].y - b.mean.y;
-
-		auto maxu = std::max(ux, uy);
-		ux /= maxu;
-		uy /= maxu;
 
 		for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
 			auto px = xi / (w - 1.0) - 0.5;
@@ -260,47 +287,28 @@ void compute_probability_grid(State& state) noexcept {
 			px -= b.pos.x;
 			py -= b.pos.y;
 
-			// auto z = px >= 0 ? std::atan(py / px) : PI + std::atan(py / px);
-			auto z = std::atan(py / px);
-			
-
-#if 0
-			auto l = (sy / std::tan(z) - sx) / -(2 * sx * sy);
-
-			auto p = 1;
-			p *= 1.0 / (std::cos(z) * std::tan(z) * std::cos(z) * std::tan(z));
-			p *= 1.0 / (2 * PI * sx * sy);
-			p *= std::exp(l * uy) * (w / l - 1.0 / (l * l));
-#elif 0
-
-			auto sign = z >= 0 ? 1 : -1;
-		
-
-			auto pxy = 0; // maybe check that this assumption is true (X, Y) independant
-			auto uv1 = -sign * ux * std::sin(z) + sign * uy * std::cos(z);
-			auto sv1 = std::sqrt(
-				sx * sx * std::sin(z) * std::sin(z) +
-				sy * sy * std::cos(z) * std::cos(z) -
-				pxy * sx * sy * std::sin(2 * z)
-			);
-
-			auto pvy = sign * sy * std::cos(z) - sign * pxy * sx * std::sin(z) / sv1;
-
-			auto p = (1 + sign) / 2 * Q1(uy / sy);
-			p += Q2(sign * uv1 / sv1, -sign * uy / sy, -pvy);
-#elif 1
+			auto z = PI/2 -std::atan(py / px);
 			auto tz = std::tan(z);
 
 			auto d = 2 * sx2 * sy2;
 			auto a = (sy2 + sx2 * tz * tz) / d;
-			auto b = -(-2 * sy2 * ux - 2 * sx2 * tz * uy) / d;
+			auto b = 2 * (sy2 * ux + sx2 * tz * uy) / d;
 			auto c = -(ux*ux * sy2 + sx2 * uy*uy) / d;
 
-			auto f = 1.0 / (std::cos(z) * std::cos(z));
-			f /= sx*sy*2*PI;
 
-			auto p = f * std::sqrt(PI) * b / (2 * std::pow(a, 1.5)) * std::exp(b*b / (4*a) + c);
-#endif
+			auto f = 1.0 / (std::cos(z) * std::cos(z) * sx*sy*2*PI);
+			auto p = std::exp(-c) * f;
+			p *= (
+				2 * std::sqrt(a) +
+				std::sqrt(PI) * b * std::exp(b*b / (4*a)) * std::erf(b/(2*std::sqrt(a)))
+			) / (2 * std::pow(a, 1.5));
+			if (b_idx == 0) {
+				frame_debug_values.add_to_distribution("a", a);
+				frame_debug_values.add_to_distribution("b", b);
+				frame_debug_values.add_to_distribution("p", p);
+				frame_debug_values.add_to_distribution("e", 2 * std::sqrt(a) +
+				std::sqrt(PI) * b * std::exp(b*b / (4*a)) * std::erf(b/(2*std::sqrt(a))));
+			}
 			state.probability_grid[xi + yi * w] *= p;
 		}
 	}

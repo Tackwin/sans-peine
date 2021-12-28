@@ -12,7 +12,10 @@
 // 0.4/0.6/0.8/1.2 mG RMS
 // 50/100/225/580 hz
 
-
+// MMC34160PJ
+// 1.5 mG RMS
+// 125 hZ
+// +- 16 G
 
 
 constexpr auto N_Sync_Seq = 32;
@@ -38,7 +41,7 @@ HMC5883L beacons[N_Beacons];
 bool healthy[N_Beacons] = { false };
 
 TCA9548 multiplexer(0x70);
-size_t BUS_MAP[] = {7, 6, 5, 4, 3, 2, 6, 7};
+size_t BUS_MAP[] = {2, 3, 4, 5, 6, 7, 6, 7};
 
 
 void setup() {
@@ -68,9 +71,9 @@ void setup() {
 			continue;
 		}
 		serial_printf(".");
-		beacons[i].setSamples(HMC5883L_SAMPLES_1);
+		beacons[i].setSamples(HMC5883L_SAMPLES_8);
 		serial_printf(".");
-		beacons[i].setRange(HMC5883L_RANGE_2_5GA);
+		beacons[i].setRange(HMC5883L_RANGE_8_1GA);
 		serial_printf(".");
 		beacons[i].setDataRate(HMC5883L_DATARATE_75HZ);
 		serial_printf(".\n");

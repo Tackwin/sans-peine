@@ -11,12 +11,12 @@ struct array_view {
 };
 
 constexpr std::tuple<double, double> Beacons_Pos[] = {
-	{-0.01, -0.06},
-	{+0.01, -0.04},
-	{-0.01, -0.02},
-	{-0.01, +0.02},
-	{+0.01, +0.04},
-	{-0.01, +0.06},
+	{+0.00, -0.06},
+	{+0.00, -0.04},
+	{+0.00, -0.02},
+	{+0.00, +0.02},
+	{+0.00, +0.04},
+	{+0.00, +0.06},
 };
 
 constexpr std::tuple<double, double, double> Viridis_Color_Map[] = {

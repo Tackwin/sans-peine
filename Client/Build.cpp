@@ -6,6 +6,7 @@ Build build(Flags flags) noexcept {
 	auto b = Build::get_default(flags);
 
 	b.name = "Client";
+	b.flags.fast_math = true;
 
 	b.add_define("SFML_STATIC");
 	b.add_source_recursively("./src/");
@@ -26,3 +27,4 @@ Build build(Flags flags) noexcept {
 
 	return b;
 }
+

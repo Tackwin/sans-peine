@@ -84,8 +84,8 @@ struct State {
 
 	sf::Texture probability_texture;
 	double* probability_grid = nullptr;
-	double probability_resolution = 0.005;
-	double probability_space_size = 1;
+	double probability_resolution = 0.002;
+	double probability_space_size = 0.5;
 };
 
 extern void render_triangulation(State& state) noexcept;

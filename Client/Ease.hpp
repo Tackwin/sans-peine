@@ -56,21 +56,6 @@ exit
 
 namespace EASE_NAMESPACE {
 
-namespace details {
-	template<typename Callable>
-	struct Defer {
-		~Defer() noexcept { todo(); }
-		Defer(Callable todo) noexcept : todo(todo) {};
-	private:
-		Callable todo;
-	};
-};
-
-#define CONCAT_(x, y) x##y
-#define CONCAT(x, y) CONCAT_(x, y)
-#define defer details::Defer CONCAT(defer_, __COUNTER__) = [&]
-
-
 static std::filesystem::path Working_Directory;
 
 struct Flags {
@@ -86,6 +71,7 @@ struct Flags {
 	bool scratch = false;
 	bool install = false;
 	bool assembly = false;
+	bool fast_math = false;
 	bool show_help = false;
 	bool link_only = false;
 	bool no_inline = false;
@@ -237,6 +223,8 @@ struct Build {
 
 	bool invert_header_implementation_define = false;
 
+	size_t stack_size = 8196;
+
 	std::filesystem::path compiler;
 	std::filesystem::path archiver; // I don't really like to need llvm-ar or something
 	                                // i feel like we could do this ourself, it's just concatenating
@@ -252,8 +240,6 @@ struct Build {
 
 	std::vector<std::filesystem::path> export_files;
 	std::vector<std::filesystem::path> export_dest_files;
-
-	std::vector<std::string> link_flags;
 
 	std::vector<Commands> pre_compile;
 	std::vector<Commands> post_compile;
@@ -283,8 +269,6 @@ struct Build {
 	void add_export(const std::filesystem::path& f) noexcept;
 	void add_export(const std::filesystem::path& from, const std::filesystem::path& to) noexcept;
 
-	void add_link_flag(std::string str) noexcept;
-
 	void add_define(std::string str) noexcept;
 	void add_debug_defines() noexcept;
 
@@ -306,6 +290,7 @@ enum class Cli_Opts {
 	Time_Trace,
 	Define,
 	Optimisation,
+	Fast_Math,
 	No_Optimisation,
 	Preprocess,
 	Arch_32,
@@ -315,6 +300,7 @@ enum class Cli_Opts {
 	No_Default_Lib,
 	OpenMP,
 	Native,
+	Stack_Size,
 	No_Inline
 };
 
@@ -370,6 +356,9 @@ using namespace Ease;
 
 #define NS EASE_NAMESPACE
 
+// >TODO(Tackwin): We need to move from using clang++ -Wl style options to pass
+// args to the linker to invoking directly ld or mold or lld or link.exe or whatever
+
 // trim from start (in place)
 void ltrim(std::string &s) {
 	s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
@@ -419,6 +408,9 @@ NS::Flags NS::Flags::parse(int argc, char** argv) noexcept {
 		}
 		if (strcmp(it, "--native") == 0) {
 			flags.compile_native = true;
+		}
+		if (strcmp(it, "--fast-math") == 0) {
+			flags.fast_math = true;
 		}
 		if (strcmp(it, "--debug") == 0) {
 			flags.generate_debug = true;
@@ -555,6 +547,9 @@ const char* NS::Flags::help_message() noexcept {
 	"--openmp                     Will compile with openmp if available.\n"
 	"                    Exemple: ./Build.exe --openmp\n\n"
 
+	"--fast-math                  Enable fast math optimisation.\n"
+	"                    Exemple: ./Build.exe --fast-math\n\n"
+
 	"--silent                     Will disable any write to the stdout.\n"
 	"                    Exemple: ./Build.exe --silent"
 
@@ -570,7 +565,7 @@ const char* NS::Flags::help_message() noexcept {
 
 	"--profile-build              Will produce an output file that contains information about the\n"
 	"                             time spent on each aspect of the compilation.\n"
-	"                    Exemple: ./Build.exe --profile-build\n\n"
+	"                    Exemple: ./Build.exe --profile-build"
 
 	"--verbose <level>            Change the level of verbosity.\n"
 	"                             Level 0 (default) will show a simple progress message.\n"
@@ -693,6 +688,7 @@ size_t NS::Flags::hash() const noexcept {
 	h = combine(h, install);
 	h = combine(h, assembly);
 	h = combine(h, no_inline);
+	h = combine(h, fast_math);
 	h = combine(h, show_help);
 	h = combine(h, link_only);
 	h = combine(h, profile_build);
@@ -734,6 +730,7 @@ size_t NS::Flags::rebuild_hash() const noexcept {
 	h = combine(h, assembly);
 	h = combine(h, no_inline);
 	h = combine(h, link_only);
+	h = combine(h, fast_math);
 	h = combine(h, compile_native);
 	h = combine(h, generate_debug);
 	h = combine(h, state_file);
@@ -869,9 +866,6 @@ void NS::Build::del_source_recursively(const std::filesystem::path& f) noexcept 
 	}
 }
 
-void NS::Build::add_link_flag(std::string str) noexcept {
-	link_flags.emplace_back(std::move(str));
-}
 
 void NS::Build::add_header(const std::filesystem::path& f) noexcept {
 	auto x = f;
@@ -1150,6 +1144,7 @@ NS::Commands compile_command_object(const NS::Build_State& state, const NS::Buil
 		else
 			command += " " + get_cli_flag(b.cli, Cli_Opts::No_Optimisation);
 
+		if (b.flags.fast_math) command += " " + get_cli_flag(b.cli, Cli_Opts::Fast_Math);
 
 		command += " " + get_cli_flag(b.cli, Cli_Opts::Object_Output, o.generic_string());
 
@@ -1220,6 +1215,7 @@ NS::Commands compile_assembly(const NS::Build_State& state, const NS::Build& b) 
 			command += " " + get_cli_flag(b.cli, Cli_Opts::No_Optimisation);
 
 		if (b.flags.no_inline) command += " " + get_cli_flag(b.cli, Cli_Opts::No_Inline);
+		if (b.flags.fast_math) command += " " + get_cli_flag(b.cli, Cli_Opts::Fast_Math);
 
 
 		for (auto& d : b.defines) command += " " + get_cli_flag(b.cli, Cli_Opts::Define, d);
@@ -1251,11 +1247,12 @@ NS::Commands compile_command_link_exe(const NS::Build& b) noexcept {
 	std::string command;
 
 	command = b.compiler.generic_string() + " ";
-	for (auto& x : b.link_flags) command += x + " ";
 
 	if (b.target == Build::Target::Shared)
 		command += get_cli_flag(b.cli, Cli_Opts::Link_Shared) + " ";
 	
+	command += get_cli_flag(b.cli, Cli_Opts::Stack_Size, std::to_string(b.stack_size)) + " ";
+
 	for (auto x : b.source_files) {
 		std::filesystem::path o = b.flags.get_build_path();
 		o += unique_name(b, x) + ".o";
@@ -1401,8 +1398,7 @@ bool execute(const NS::Build& build, const NS::Commands& c) noexcept {
 		printf("There was an error in the build. There should be more informations above.");
 	}
 #endif
-
-	return stop_flag;
+	return !stop_flag;
 }
 
 void add_install_path(NS::Build& b) noexcept {
@@ -1463,12 +1459,8 @@ void handle_build(Build& b, NS::States& new_states) noexcept {
 		std::filesystem::create_directory(b.flags.get_build_path());
 		std::filesystem::create_directory(b.flags.get_temp_path());
 
-		defer { std::filesystem::remove_all(b.flags.get_temp_path()); };
-
-		bool early_fail = false;
-		for (auto& x : b.pre_compile) if (early_fail |= execute(b, x); early_fail) break;
-
-		if (early_fail) break;
+		bool successful = true;
+		for (auto& x : b.pre_compile) successful &= execute(b, x);
 
 		::NS::Commands c;
 
@@ -1482,23 +1474,19 @@ void handle_build(Build& b, NS::States& new_states) noexcept {
 		if (!b.flags.link_only) {
 			if (b.flags.assembly) {
 				c = compile_assembly({}, b);
-				early_fail |= execute(b, c);
+				successful &= execute(b, c);
 			}
 
-			if (early_fail) break;
-
 			c = compile_command_incremetal_check(b);
-			early_fail |= execute(b, c);
-			if (early_fail) break;
+			successful &= execute(b, c);
 			set_files_hashes(b.flags.get_temp_path(), new_state);
 			if (!b.flags.scratch)
 				b.current_state = NS::Build_State::get_unchanged(b.current_state, new_state);
 
 			c = compile_command_object(b.current_state, b);
 
-			early_fail |= execute(b, c);
-			if (early_fail) break;
-			for (auto& x : b.post_compile) execute(b, x);
+			successful &= execute(b, c);
+			for (auto& x : b.post_compile) successful &= execute(b, x);
 		}
 		if (b.target == NS::Build::Target::Static) {
 			c = compile_command_link_static(b);
@@ -1510,16 +1498,11 @@ void handle_build(Build& b, NS::States& new_states) noexcept {
 			b.to_install.push_back(*x.output);
 		}
 
-		for (auto& x : b.pre_link) if (early_fail |= execute(b, x); early_fail) break;
-		if (early_fail) break;
+		for (auto& x : b.pre_link) successful &= execute(b, x);
+		successful &= execute(b, c);
+		for (auto& x : b.post_link) successful &= execute(b, x);
 
-		early_fail |= execute(b, c);
-		if (early_fail) break;
-
-		for (auto& x : b.post_link) if (early_fail |= execute(b, x); early_fail) break;
-		if (early_fail) break;
-
-		if (b.target == NS::Build::Target::Exe && b.flags.run_after_compilation) {
+		if (b.target == NS::Build::Target::Exe && b.flags.run_after_compilation && successful) {
 			std::string run = NS::details::get_output_path(b).generic_string();
 			for (auto& x : b.flags.rest_args) run += " " + x;
 			if (!Env::Win32) run = "./" + run;
@@ -1527,6 +1510,7 @@ void handle_build(Build& b, NS::States& new_states) noexcept {
 			system(run.c_str());
 		}
 
+		std::filesystem::remove_all(b.flags.get_temp_path());
 		break;
 	}
 	default:
@@ -1723,20 +1707,27 @@ std::string NS::details::get_cli_flag(
 		X("-fno-inline", "/Ob0");
 	case NS::Cli_Opts::OpenMP :
 		X("-fopenmp", "/OpenMP");
+	case NS::Cli_Opts::Fast_Math :
+		X("-ffast-math", "/fp:fast");
 	case NS::Cli_Opts::Debug_Symbol_Link :
-		X("-g3 -gno-column-info", "/DEBUG");
+		X("-g -gno-column-info", "/DEBUG");
 	case NS::Cli_Opts::Debug_Symbol_Compile :
-		X("-g3 -gcodeview -gno-column-info", "/Z7");
+		X("-g -gcodeview -gno-column-info", "/Z7");
 
 	case NS::Cli_Opts::No_Default_Lib : {
 		// >TODO(Tackwin): here we need to check the linker's cli instead of the compiler.
 		X("-Xlinker /NODEFAULTLIB", "/NODEFAULTLIB");
 	}
 
+	// >TODO(Tackwin): The stack size is fucked
+	// >TODO(Tackwin): I think there is a bug with the arch 32 cli opts.
+
 	case NS::Cli_Opts::Time_Trace :
 		X(std::string("-ftime-trace"), "");
+	case NS::Cli_Opts::Stack_Size :
+		// X(std::string("-Wl,-stack_size -Wl,") + param.data(), "");
 	case NS::Cli_Opts::Arch_32 :
-		X(std::string("-m32"), "");
+		// X(std::string("-m32"), "");
 	case NS::Cli_Opts::Native :
 		X(std::string("-march=native"), "");
 	case NS::Cli_Opts::Compile :

@@ -58,10 +58,9 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		for (size_t n = 0; n < N_Beacons; ++n) {
 			auto t = 0.5 - n / (N_Beacons - 1.0);
 
+			state.beacons[state.n_beacons_placed] = {};
 			state.beacons[state.n_beacons_placed].pos.x = std::get<0>(Beacons_Pos[n]);
 			state.beacons[state.n_beacons_placed].pos.y = std::get<1>(Beacons_Pos[n]);
-			state.beacons[state.n_beacons_placed].calibration_sample = 0;
-			state.beacons[state.n_beacons_placed].sum_sample = {};
 			state.n_beacons_placed++;
 		}
 	}
@@ -122,7 +121,19 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		gui_state.display_matrix[i + j * N_Beacons] = false;
 	}
 
+	ImGui::Separator();
 	ImGui::Checkbox("Calibrating", &gui_state.calibrating);
+
+	for (size_t i = 0; i < N_Beacons; ++i) {
+		auto& b = state.beacons[i];
+		ImGui::Text(
+			"% 10.9lf +- % 10.9lf | % 10.9lf +- % 10.9lf | % 10.9lf +- % 10.9lf",
+			b.mean.x, b.std.x,
+			b.mean.y, b.std.y,
+			b.mean.z, b.std.z
+		);
+	}
+	ImGui::Separator();
 
 	gui_state.want_compute = false;
 	gui_state.want_next_reading = false;
@@ -175,6 +186,50 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		ImGui::End();
 	}
 
+
+	if (ImGui::Begin("Debug values", &gui_state.debug_opened)) {
+		for (auto& [name, values] : frame_debug_values.histograms) if (values.size() > 1) {
+
+			ImGui::Separator();
+			ImGui::Text("%s", name);
+
+			auto min_v = values.front();
+			auto max_v = values.front();
+
+			for (auto& x : values) min_v = std::min(x, min_v);
+			for (auto& x : values) max_v = std::max(x, max_v);
+
+			auto n_bins = (size_t)(std::log2(values.size()) + 0.5);
+			auto dt = (max_v - min_v) / n_bins;
+
+			struct User_Ptr { std::vector<double>& values; double min_v; double max_v; double dt; };
+
+			User_Ptr user_ptr = { values, min_v, max_v, dt };
+
+			ImGui::Text("Min Max: %10.8lf %10.8lf", min_v, max_v);
+			ImGui::PlotHistogram("", [](void* data, int idx) -> float {
+				User_Ptr& user_ptr = *(User_Ptr*)data;
+
+				double s = 0;
+				for (auto& x : user_ptr.values) {
+					if (
+						user_ptr.min_v + idx * user_ptr.dt <= x &&
+						x < user_ptr.min_v + (idx + 1) * user_ptr.dt
+					) s += 1;
+				}
+
+				return s;
+			}, &user_ptr, n_bins, 0, 0, FLT_MAX, FLT_MAX, {0, 200});
+		} else if (values.size() == 1) {
+			ImGui::Separator();
+			ImGui::Text("%s %10.8llf", name, values.front());
+		}
+
+	}
+	frame_debug_values.reset();
+	ImGui::End();
+
+
 	ImGui::End();
 }
 
@@ -197,13 +252,17 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	lines.resize(N_Beacons);
 
 	float maxs[N_Beacons];
+	float mins[N_Beacons];
+	for (auto& x : maxs) x = -FLT_MAX;
+	for (auto& x : mins) x = +FLT_MAX;
 	size_t n = readings.size();
 
 	for (size_t j = 0; j < N_Beacons; ++j) {
 		for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
 			auto& a = readings[i].beacons[j];
-			lines[j].push_back((float)a.x);
-			maxs[j] = (float)(a.x > maxs[j] ? a.x : maxs[j]);
+			lines[j].push_back(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z));
+			maxs[j] = (float)(lines[j].back() > maxs[j] ? lines[j].back() : maxs[j]);
+			mins[j] = (float)(lines[j].back() < mins[j] ? lines[j].back() : mins[j]);
 		}
 	}
 
@@ -215,7 +274,10 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	conf.values.count = (int)std::min(readings.size(), N_Samples);
 
 	conf.scale.min = 0;
+	conf.scale.max = 0;
+	for (auto& x : mins) conf.scale.min = std::min(conf.scale.min, x);
 	for (auto& x : maxs) conf.scale.max = std::max(conf.scale.max, x);
+	conf.scale.min *= 1.1f;
 	conf.scale.max *= 1.1f;
 
 	conf.tooltip.show = true;
@@ -236,7 +298,8 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	for (size_t i = 0; i < N_Beacons; ++i) {
 		conf.values.ys_list = ys.data() + i;
 		conf.values.ys_count = 1;
-		conf.scale.max = 1.1f * maxs[i];
+		conf.scale.min = 1.1f * std::min(mins[i], 0.f);
+		conf.scale.max = 1.1f * std::max(maxs[i], 0.f);
 
 		conf.grid_y.size = conf.scale.max / 5;
 
@@ -244,4 +307,18 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	}
 
 	ImGui::SliderSize("#Samples", &N_Samples, 10, 1000);
+}
+
+Debug_Values frame_debug_values;
+
+void Debug_Values::reset() noexcept {
+	histograms.clear();
+}
+
+void Debug_Values::add_to_distribution(const char* name, double x) noexcept {
+	if (histograms.count(name) == 0) {
+		histograms[name].reserve(1000);
+	}
+
+	histograms[name].push_back(x);
 }
