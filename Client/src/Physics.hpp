@@ -36,8 +36,8 @@ struct Simulation_Parameters {
 struct Simulation_Result {
 	Simulation_Parameters input_parameters;
 
-	std::array<std::vector<double>, N_Beacons> distance_fields;
-	std::array<std::vector<double>, N_Beacons> angle_fields;
+	std::vector<std::array<double, N_Beacons>> distance_fields;
+	std::vector<std::array<double, N_Beacons>> angle_fields;
 };
 
 struct State;

@@ -229,7 +229,7 @@ void update(State& state) noexcept {
 		auto t1 = seconds();
 		auto sim_res = space_sim(sim_params);
 		compute_probability_grid(state, sim_res);
-		printf("Elapsed %10.8lf\n", seconds() - t1);
+		// printf("Elapsed %10.8lf\n", seconds() - t1);
 	}
 
 	if (state.new_reading) {
@@ -249,8 +249,48 @@ void update(State& state) noexcept {
 				});
 				break;
 			}
-			default: {
-				state.estimated_points.push_back({});
+			case GUI_State::Trace_Mode::Avg : {
+				Vector2d sum = {};
+				long double norm = 0;
+				for (size_t i = 0; i < w * h; ++i) norm += state.probability_grid[i];
+
+				for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+					auto px = xi / (w - 1.0) - 0.5;
+					auto py = yi / (h - 1.0) - 0.5;
+
+					px *= state.probability_space_size * 1;
+					py *= state.probability_space_size * 1;
+
+					auto p = state.probability_grid[xi + yi * w] / norm;
+					sum.x += p * px;
+					sum.y += p * py;
+				}
+
+				state.estimated_points.push_back(sum);
+				break;
+			}
+			case GUI_State::Trace_Mode::Avg2 : {
+				Vector2d sum = {};
+				long double norm = 0;
+
+				for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+					auto px = xi / (w - 1.0) - 0.5;
+					auto py = yi / (h - 1.0) - 0.5;
+
+					px *= state.probability_space_size * 1;
+					py *= state.probability_space_size * 1;
+
+					auto p = state.probability_grid[xi + yi * w];
+					p *= p;
+					norm += p;
+					sum.x += p * px;
+					sum.y += p * py;
+				}
+
+				sum.x /= norm;
+				sum.y /= norm;
+
+				state.estimated_points.push_back(sum);
 				break;
 			}
 			}
@@ -304,7 +344,7 @@ void render(State& state) noexcept {
 		shape.setFillColor({255, 0, 0, 255});
 		state.renderTarget->draw(shape);
 	}
-	// render_estimation_trace(state);
+	render_estimation_trace(state);
 	// render_triangulation(state);
 }
 

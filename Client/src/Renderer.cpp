@@ -345,8 +345,8 @@ void render_estimation_trace(State& state) noexcept {
 		auto next = state.estimated_points[i + stride];
 
 		sf::Vertex l[] = {
-			sf::Vertex(sf::Vector2f{(float)curr.x, (float)curr.y}),
-			sf::Vertex(sf::Vector2f{(float)next.x, (float)next.y})
+			sf::Vertex(sf::Vector2f{(float)curr.x, -(float)curr.y}),
+			sf::Vertex(sf::Vector2f{(float)next.x, -(float)next.y})
 		};
 		state.renderTarget->draw(l, 2, sf::Lines);
 	}

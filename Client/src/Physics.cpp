@@ -195,9 +195,11 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 			I(std::sqrt(lambda * x), k / 2 - 1);
 	};
 
+	std::array<double, N_Beacons> def;
+	for (auto& x : def) x = 1;
 
-	for (auto& x : result.distance_fields) x.resize(state.distance_resolution, 1);
-	for (auto& x : result.angle_fields)    x.resize(state.angle_resolution, 1);
+	result.distance_fields.resize(state.distance_resolution, def);
+	result.angle_fields.resize(state.angle_resolution, def);
 
 	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.use_dist[b_idx]) {
 		auto& b = state.beacons[b_idx];
@@ -220,9 +222,7 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 			auto c = state.magnet_strength * u0 / (4 * PI);
 
 			auto p = N(c / (d * d * d), u, s) * 3 * c / (d * d * d *d);
-			result.distance_fields[b_idx][i] = p;
-
-			frame_debug_values.add_to_distribution("distance", p);
+			result.distance_fields[i][b_idx] = p;
 		}
 	}
 
@@ -282,7 +282,7 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 			long double d = 2 * sx2 * sy2;
 			long double a = (sy2 + sx2 * tz * tz) / d;
 			long double b = 2 * (sy2 * ux + sx2 * tz * uy) / d;
-			long double c = -(ux*ux * sy2 + sx2 * uy*uy) / d;
+			long double c = (ux*ux * sy2 + sx2 * uy*uy) / d;
 
 
 			long double f = 1.0 / (std::cos(z) * std::cos(z) * sx*sy*2*PI);
@@ -306,7 +306,7 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 
 			#endif
 
-			result.angle_fields[b_idx][i] = p;
+			result.angle_fields[i][b_idx] = p;
 		}
 	}
 	return result;
@@ -339,14 +339,16 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 
 			size_t t = (size_t)(d / result.input_parameters.distance_step);
 			if (t < result.input_parameters.distance_resolution)
-				state.probability_grid[idx] *= result.distance_fields[b_idx][t];
+				state.probability_grid[idx] *= result.distance_fields[t][b_idx];
 
 			double a = PI / 2;
 			if (x != 0) a = (PI/2 - fast_atan2(y, x));
 			if (a < 0) a += 2 * PI;
 
 			t = (size_t)(result.input_parameters.distance_resolution * a / (2 * PI));
-			state.probability_grid[idx] *= result.angle_fields[b_idx][t];
+			state.probability_grid[idx] *= result.angle_fields[t][b_idx];
 		}
+
+		frame_debug_values.add_to_distribution("p", state.probability_grid[idx]);
 	}
 }

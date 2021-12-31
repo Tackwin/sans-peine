@@ -71,7 +71,7 @@ void setup() {
 			continue;
 		}
 		serial_printf(".");
-		beacons[i].setSamples(HMC5883L_SAMPLES_8);
+		beacons[i].setSamples(HMC5883L_SAMPLES_1);
 		serial_printf(".");
 		beacons[i].setRange(HMC5883L_RANGE_8_1GA);
 		serial_printf(".");

@@ -46,7 +46,7 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	ImGui::SliderSize("Oversampling", &gui_state.oversampling, 1, 100);
 	ImGui::SliderDouble("Sensitivity", &gui_state.sensitivity, 0, 0.5, "%.6f", 2);
 
-	const char* items[] = { "Max", "Avg" };
+	const char* items[] = { "Max", "Avg", "Avg2" };
 	int item_current = (int)gui_state.trace_mode;
 	ImGui::ListBox("Trace Mode", &item_current, items, (int)GUI_State::Trace_Mode::Count);
 	gui_state.trace_mode = (GUI_State::Trace_Mode)item_current;
@@ -78,6 +78,7 @@ void render(State& state, GUI_State& gui_state) noexcept {
 
 	if (ImGui::Button("Clear")) {
 		state.readings.clear();
+		state.estimated_points.clear();
 		// for (auto& x : state.beacons) {
 		// 	x.calibration_sample = 0;
 		// 	x.sum_sample = {};

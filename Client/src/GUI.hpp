@@ -53,6 +53,7 @@ struct GUI_State {
 	enum Trace_Mode {
 		Max = 0,
 		Avg,
+		Avg2,
 		Count
 	} trace_mode = Trace_Mode::Max;
 
