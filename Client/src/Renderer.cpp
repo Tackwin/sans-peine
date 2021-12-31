@@ -126,10 +126,13 @@ void render_triangulation(State& state) noexcept {
 
 
 			sf::Vertex line[2] = {
-				sf::Vertex(state.beacons[i].pos),
 				sf::Vertex({
-					state.beacons[i].pos.x + std::cosf(alpha),
-					state.beacons[i].pos.y + std::sinf(alpha)
+					(float)state.beacons[i].pos.x,
+					(float)state.beacons[i].pos.y,
+				}),
+				sf::Vertex({
+					(float)(state.beacons[i].pos.x + std::cosf(alpha)),
+					(float)(state.beacons[i].pos.y + std::sinf(alpha))
 				})
 			};
 
@@ -146,8 +149,8 @@ std::optional<sf::Vector2f> triangulate(State& state, Reading r, size_t i, size_
 
 	if (state.n_beacons_placed < N_Beacons) return {};
 
-	sf::Vector2f b1 = state.beacons[i].pos;
-	sf::Vector2f b2 = state.beacons[j].pos;
+	auto b1 = state.beacons[i].pos;
+	auto b2 = state.beacons[j].pos;
 
 #if 0
 	double bi = std::hypot(r.beacons[i].x, r.beacons[i].y, r.beacons[i].z);
@@ -170,7 +173,7 @@ std::optional<sf::Vector2f> triangulate(State& state, Reading r, size_t i, size_
 	double jy =
 		r.beacons[j].y - state.beacons[j].sum_sample.y / state.beacons[j].calibration_sample;
 
-	auto base_length = std::hypot((b1 - b2).x, (b1 - b2).y);
+	auto base_length = std::hypot(b1.x - b2.x, b1.x - b2.y);
 
 
 	// The magnetometer have the folowing axis
@@ -197,8 +200,8 @@ Y
 	double alpha = std::atan2(ix, -iy);
 	double beta  = std::atan2(jx, -jy);
 
-	sf::Vector2f b1_unit = b1;
-	sf::Vector2f b2_unit = b2;
+	auto b1_unit = b1;
+	auto b2_unit = b2;
 	b1_unit.x += (float)std::cos(alpha);
 	b1_unit.y += (float)std::sin(alpha);
 	b2_unit.x += (float)std::cos(beta);
@@ -331,4 +334,20 @@ void update_probability_texture(State& state) noexcept {
 	}
 
 	state.probability_texture.loadFromImage(probability_image);
+}
+
+void render_estimation_trace(State& state) noexcept {
+	size_t offset = (size_t)state.gui.trace_mode;
+	size_t stride = (size_t)state.gui.Count;
+	
+	for (size_t i = offset; i + stride < state.estimated_points.size(); i += stride) {
+		auto curr = state.estimated_points[i];
+		auto next = state.estimated_points[i + stride];
+
+		sf::Vertex l[] = {
+			sf::Vertex(sf::Vector2f{(float)curr.x, (float)curr.y}),
+			sf::Vertex(sf::Vector2f{(float)next.x, (float)next.y})
+		};
+		state.renderTarget->draw(l, 2, sf::Lines);
+	}
 }

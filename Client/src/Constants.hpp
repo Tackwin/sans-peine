@@ -1,8 +1,11 @@
 #pragma once
 
 constexpr double PI = 3.141592653589793238462643383279502884;
+constexpr double u0 = 1.225663753e-6;
 constexpr size_t N_Beacons = 6;
 
+constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
+constexpr const char* App_Name = "SP Client";
 
 template<typename T>
 struct array_view {

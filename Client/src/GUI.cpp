@@ -44,6 +44,12 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	ImGui::SliderDouble("Magnet Strength", &gui_state.magnet_strength, 0, 100, "%.7f", 6);
 	ImGui::SliderDouble("Magnet Height", &gui_state.magnet_height, 0, 0.10);
 	ImGui::SliderSize("Oversampling", &gui_state.oversampling, 1, 100);
+	ImGui::SliderDouble("Sensitivity", &gui_state.sensitivity, 0, 0.5, "%.6f", 2);
+
+	const char* items[] = { "Max", "Avg" };
+	int item_current = (int)gui_state.trace_mode;
+	ImGui::ListBox("Trace Mode", &item_current, items, (int)GUI_State::Trace_Mode::Count);
+	gui_state.trace_mode = (GUI_State::Trace_Mode)item_current;
 
 	ImGui::Checkbox("Live", &gui_state.sample_live);
 	ImGui::SameLine();
@@ -92,15 +98,15 @@ void render(State& state, GUI_State& gui_state) noexcept {
 
 	thread_local char temp_buffer[256];
 	ImGui::PushID("Selection measures");
-	thread_local bool all_dist = true;
-	thread_local bool all_angle = true;
+	thread_local bool all_dist = false;
+	thread_local bool all_angle = false;
 
 	ImGui::PushID("Dist");
 	if (ImGui::Checkbox("All Distance", &all_dist))
 		for (auto& x : gui_state.use_dist_beacon) x = all_dist;
 	for (size_t i = 0; i < N_Beacons; ++i) {
 		ImGui::SameLine();
-		sprintf(temp_buffer, "%d", i);
+		sprintf(temp_buffer, "%d", (int)i);
 		ImGui::Checkbox(temp_buffer, &gui_state.use_dist_beacon[i]);
 	}
 	ImGui::PopID();
@@ -110,7 +116,7 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		for (auto& x : gui_state.use_angle_beacon) x = all_angle;
 	for (size_t i = 0; i < N_Beacons; ++i) {
 		ImGui::SameLine();
-		sprintf(temp_buffer, "%d", i);
+		sprintf(temp_buffer, "%d", (int)i);
 		ImGui::Checkbox(temp_buffer, &gui_state.use_angle_beacon[i]);
 	}
 	ImGui::PopID();
@@ -173,8 +179,8 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		ImGui::PlotLines("Section X", [](void* data, int idx) -> float {
 			State& s = *(State*)data;
 
-			auto d = s.space_res->field[10 * idx + 500 * 1001];
-			return (float)d;
+			// auto d = s.space_res->field[10 * idx + 500 * 1001];
+			return (float)0;
 		}, &state, 100, 0);
 	}
 
@@ -222,9 +228,13 @@ void render(State& state, GUI_State& gui_state) noexcept {
 			}, &user_ptr, n_bins, 0, 0, FLT_MAX, FLT_MAX, {0, 200});
 		} else if (values.size() == 1) {
 			ImGui::Separator();
-			ImGui::Text("%s %10.8llf", name, values.front());
+			ImGui::Text("%s %10.8lf", name, values.front());
 		}
 
+		ImGui::Separator();
+		ImGui::Separator();
+
+		for (auto& [n, x] : frame_debug_values.values) ImGui::Text("%s %10.8lf", n, x);
 	}
 	frame_debug_values.reset();
 	ImGui::End();
@@ -321,4 +331,8 @@ void Debug_Values::add_to_distribution(const char* name, double x) noexcept {
 	}
 
 	histograms[name].push_back(x);
+}
+
+void Debug_Values::watch(const char* name, double x) noexcept {
+	values[name] = x;
 }

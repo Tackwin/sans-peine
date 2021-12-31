@@ -7,9 +7,11 @@
 
 struct Debug_Values {
 	std::unordered_map<const char*, std::vector<double>> histograms;
+	std::unordered_map<const char*, double> values;
 
 	void reset() noexcept;
 	void add_to_distribution(const char* name, double x) noexcept;
+	void watch(const char* name, double x) noexcept;
 };
 
 extern Debug_Values frame_debug_values;
@@ -24,7 +26,7 @@ struct GUI_State {
 	double magnet_height = 0.06;
 
 	size_t oversampling = 1;
-	bool calibrating = false;
+	bool calibrating = true;
 	bool display_matrix[N_Beacons * N_Beacons] = { true };
 
 	Simulation_Parameters space_sim;
@@ -43,10 +45,18 @@ struct GUI_State {
 	size_t sample_to_display = 0;
 	bool sample_live = true;
 
-	bool use_dist_beacon[N_Beacons];
-	bool use_angle_beacon[N_Beacons];
+	std::array<bool, N_Beacons> use_dist_beacon;
+	std::array<bool, N_Beacons> use_angle_beacon;
 
 	bool debug_opened = false;
+
+	enum Trace_Mode {
+		Max = 0,
+		Avg,
+		Count
+	} trace_mode = Trace_Mode::Max;
+
+	double sensitivity = 0.10;
 };
 
 struct State;

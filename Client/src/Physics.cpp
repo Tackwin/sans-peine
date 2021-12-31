@@ -2,8 +2,13 @@
 #include <cmath>
 #include "Renderer.hpp"
 #include <cmath>
+#include "Macro.hpp"
 
-extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
+#include "fast_math.hpp"
+
+extern Simulation_Result _space_sim(Simulation_Parameters& state) noexcept {
+	Simulation_Result result;
+#if 0
 	double h = state.h;
 	double dist = state.pivot_distance + h / 2;
 
@@ -77,7 +82,6 @@ extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 	};
 
 
-	Simulation_Result result;
 
 	result.field.reserve((state.resolution + 1) * (state.resolution + 1) * 6);
 	result.field.resize((state.resolution + 1) * (state.resolution + 1) * 3);
@@ -149,25 +153,21 @@ extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 
 	result.resolution = state.resolution;
 
+#endif
 	return result;
 }
 
-void compute_probability_grid(State& state) noexcept {
-	constexpr double u0 = 1.225663753e-6;
-	constexpr double PI = 3.141592653589793238462643383279502884;
-
-
-	if (state.readings.size() < 2) return;
-	auto to_draw = state.gui.sample_live ? state.readings.size() : state.gui.sample_to_display;
-	auto read = state.readings[to_draw - 1];
-
-	auto w = (size_t)(state.probability_space_size / state.probability_resolution);
-	auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
+	// >SPEED(Tackwin): result allocate the space for the result itself but it's stupid we
+	// could pass the space as a parameter to save allocation since we likely want to reuse the
+	// space for new readings.
+	Simulation_Result result;
+	
+	auto read = state.reading;
 
 	auto N = [] (double x, double u, double s) -> double {
 		return std::exp(-0.5 * ((x - u) / s) * ((x - u) / s)) / (s * std::sqrt(2 * PI));
 	};
-
 
 	auto I = [] (double x, double a) -> double {
 		double res = 0.0;
@@ -183,6 +183,7 @@ void compute_probability_grid(State& state) noexcept {
 			denomi *= (j + 1);
 		}
 
+
 		return res * std::pow(x / 2, a);
 	};
 
@@ -194,9 +195,11 @@ void compute_probability_grid(State& state) noexcept {
 			I(std::sqrt(lambda * x), k / 2 - 1);
 	};
 
-	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 1;
 
-	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.gui.use_dist_beacon[b_idx]) {
+	for (auto& x : result.distance_fields) x.resize(state.distance_resolution, 1);
+	for (auto& x : result.angle_fields)    x.resize(state.angle_resolution, 1);
+
+	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.use_dist[b_idx]) {
 		auto& b = state.beacons[b_idx];
 		auto n = b.calibration_sample;
 
@@ -206,26 +209,20 @@ void compute_probability_grid(State& state) noexcept {
 
 		u = std::hypot(read.beacons[b_idx].x, read.beacons[b_idx].y, read.beacons[b_idx].z) - u;
 		u = std::abs(u);
-		
-		for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
-			auto px = xi / (w - 1.0) - 0.5;
-			auto py = yi / (h - 1.0) - 0.5;
 
-			px *= state.probability_space_size * 1;
-			py *= state.probability_space_size * 1;
+		for (size_t i = 1; i < state.distance_resolution; ++i) {
+			auto d = i * state.distance_step;
 
-			px -= b.pos.x;
-			py -= b.pos.y;
-
-			auto d = std::hypot(px, py, state.gui.magnet_height / 2);
 			auto lambda = 0.0;
 			lambda += (read.beacons[b_idx].x / b.std.x) * (read.beacons[b_idx].x / b.std.x);
 			lambda += (read.beacons[b_idx].y / b.std.y) * (read.beacons[b_idx].y / b.std.y);
 
-			auto c = state.gui.magnet_strength * u0 / (4 * PI);
+			auto c = state.magnet_strength * u0 / (4 * PI);
 
 			auto p = N(c / (d * d * d), u, s) * 3 * c / (d * d * d *d);
-			state.probability_grid[xi + yi * w] *= p;
+			result.distance_fields[b_idx][i] = p;
+
+			frame_debug_values.add_to_distribution("distance", p);
 		}
 	}
 
@@ -264,52 +261,92 @@ void compute_probability_grid(State& state) noexcept {
 		return help(x, px) + help(y, py) - delta;
 	};
 
-	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.gui.use_angle_beacon[b_idx]) {
+	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.use_angle[b_idx]) {
 		auto& b = state.beacons[b_idx];
 		auto n = b.calibration_sample;
-
-		auto sx = b.std.x * 100;
-		auto sy = b.std.x * 100;
-
-		auto sx2 = sx*sx;
-		auto sy2 = sy*sy;
 
 		auto ux = read.beacons[b_idx].x - b.mean.x;
 		auto uy = read.beacons[b_idx].y - b.mean.y;
 
-		for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
-			auto px = xi / (w - 1.0) - 0.5;
-			auto py = yi / (h - 1.0) - 0.5;
+		auto sx = b.std.x * 100 + std::abs(ux) * state.sensitivity;
+		auto sy = b.std.y * 100 + std::abs(uy) * state.sensitivity;
 
-			px *= state.probability_space_size * 1;
-			py *= state.probability_space_size * 1;
+		auto sx2 = sx*sx;
+		auto sy2 = sy*sy;
 
-			px -= b.pos.x;
-			py -= b.pos.y;
+		for (size_t i = 0; i < state.angle_resolution; ++i) {
 
-			auto z = PI/2 -std::atan(py / px);
+			auto z = PI * 2 * i / (state.angle_resolution - 1.0);
 			auto tz = std::tan(z);
 
-			auto d = 2 * sx2 * sy2;
-			auto a = (sy2 + sx2 * tz * tz) / d;
-			auto b = 2 * (sy2 * ux + sx2 * tz * uy) / d;
-			auto c = -(ux*ux * sy2 + sx2 * uy*uy) / d;
+			long double d = 2 * sx2 * sy2;
+			long double a = (sy2 + sx2 * tz * tz) / d;
+			long double b = 2 * (sy2 * ux + sx2 * tz * uy) / d;
+			long double c = -(ux*ux * sy2 + sx2 * uy*uy) / d;
 
 
-			auto f = 1.0 / (std::cos(z) * std::cos(z) * sx*sy*2*PI);
-			auto p = std::exp(-c) * f;
+			long double f = 1.0 / (std::cos(z) * std::cos(z) * sx*sy*2*PI);
+
+			#if 1
+			long double p = std::exp(-c) * f;
 			p *= (
 				2 * std::sqrt(a) +
 				std::sqrt(PI) * b * std::exp(b*b / (4*a)) * std::erf(b/(2*std::sqrt(a)))
 			) / (2 * std::pow(a, 1.5));
-			if (b_idx == 0) {
-				frame_debug_values.add_to_distribution("a", a);
-				frame_debug_values.add_to_distribution("b", b);
-				frame_debug_values.add_to_distribution("p", p);
-				frame_debug_values.add_to_distribution("e", 2 * std::sqrt(a) +
-				std::sqrt(PI) * b * std::exp(b*b / (4*a)) * std::erf(b/(2*std::sqrt(a))));
-			}
-			state.probability_grid[xi + yi * w] *= p;
+			#elif 0
+
+			auto bsqrta2 = b / (2 * std::sqrt(a));
+
+			auto p = std::log(f);
+			p -= c;
+			p -= std::log(2 / std::sqrt(PI));
+			p -= 1.5 * std::log(a);
+			p += bsqrta2 * bsqrta2;
+			p += std::log(b * std::erf(bsqrta2));
+
+			#endif
+
+			result.angle_fields[b_idx][i] = p;
+		}
+	}
+	return result;
+}
+
+void compute_probability_grid(State& state, const Simulation_Result& result) noexcept {
+	auto w = (size_t)(state.probability_space_size / state.probability_resolution);
+	auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+
+	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 1;
+
+	size_t idx = 0;
+	for (size_t yi = 0; yi < h; ++yi)
+	for (size_t xi = 0; xi < w; ++xi, ++idx)
+	{
+		auto px = xi / (w - 1.0) - 0.5;
+		auto py = yi / (h - 1.0) - 0.5;
+
+		px *= state.probability_space_size * 1;
+		py *= state.probability_space_size * 1;
+
+		for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) {
+			auto& b = state.beacons[b_idx];
+			auto x = px - b.pos.x;
+			auto y = py - b.pos.y;
+
+			auto d = std::sqrt(
+				x * x + y * y + result.input_parameters.h * result.input_parameters.h / 4
+			);
+
+			size_t t = (size_t)(d / result.input_parameters.distance_step);
+			if (t < result.input_parameters.distance_resolution)
+				state.probability_grid[idx] *= result.distance_fields[b_idx][t];
+
+			double a = PI / 2;
+			if (x != 0) a = (PI/2 - fast_atan2(y, x));
+			if (a < 0) a += 2 * PI;
+
+			t = (size_t)(result.input_parameters.distance_resolution * a / (2 * PI));
+			state.probability_grid[idx] *= result.angle_fields[b_idx][t];
 		}
 	}
 }

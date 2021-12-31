@@ -15,48 +15,7 @@
 #include "Constants.hpp"
 #include "GUI.hpp"
 #include "Physics.hpp"
-
-constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
-constexpr const char* App_Name = "SP Client";
-
-
-struct Vector3d {
-	double x, y, z = 0;
-};
-
-static Vector3d operator+(Vector3d a, Vector3d b) noexcept {
-	return { a.x + b.x, a.y + b.y, a.z + b.z };
-}
-
-static Vector3d& operator+=(Vector3d& a, Vector3d b) noexcept {
-	a = a + b;
-	return a;
-}
-static Vector3d& operator/=(Vector3d& a, double n) noexcept {
-	a.x /= n;
-	a.y /= n;
-	a.z /= n;
-	return a;
-}
-#pragma pack(push, 1)
-struct Reading {
-	Vector3d beacons[N_Beacons] = { 0 };
-	bool pressed;
-};
-
-struct Beacon {
-	sf::Vector2f pos;
-
-	Vector3d sum_sample = {};
-	Vector3d sum2_sample = {};
-	double sum_dist = 0;
-	double sum2_dist = 0;
-
-	size_t calibration_sample = 0;
-	Vector3d mean;
-	Vector3d std;
-};
-#pragma pack(pop)
+#include "Definitions.hpp"
 
 struct State {
 	size_t n_beacons_placed = 0;
@@ -72,6 +31,7 @@ struct State {
 	bool fullscreen = false;
 
 	std::vector<Reading> readings;
+	bool new_reading = false;
 
 	float zoom_level = 1.f;
 	sf::Vector2f camera_pos = {};
@@ -84,9 +44,12 @@ struct State {
 
 	sf::Texture probability_texture;
 	double* probability_grid = nullptr;
-	double probability_resolution = 0.002;
+	double probability_resolution = 0.001;
 	double probability_space_size = 0.5;
+
+	std::vector<Vector2d> estimated_points;
 };
 
 extern void render_triangulation(State& state) noexcept;
+extern void render_estimation_trace(State& state) noexcept;
 extern void update_probability_texture(State& state) noexcept;

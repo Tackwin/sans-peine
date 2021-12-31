@@ -23,6 +23,7 @@ std::optional<Reading> read_mail(State& state) noexcept;
 void update(State& state) noexcept;
 void render(State& state) noexcept;
 void upload_field_texture(State& state, Vector3d readings) noexcept;
+
 #undef main
 
 // Main code
@@ -34,8 +35,8 @@ int main(int, char**) {
 		(size_t)(state.probability_space_size / state.probability_resolution) *
 		sizeof(double)
 	);
-	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_dist_beacon[i] = true;
-	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_angle_beacon[i] = true;
+	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_dist_beacon[i] = false;
+	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_angle_beacon[i] = false;
 
 	state.context_settings.antialiasingLevel = 8;
 	sf::RenderWindow window(
@@ -128,10 +129,12 @@ void update(State& state) noexcept {
 			state.n_beacons_placed = 0;
 		} else {
 			auto pos = sf::Mouse::getPosition(*state.window);
-			state.beacons[state.n_beacons_placed].pos =
-				state.renderTarget->mapPixelToCoords(pos);
-			state.beacons[state.n_beacons_placed].calibration_sample = 0;
-			state.beacons[state.n_beacons_placed].sum_sample = {};
+			auto& b = state.beacons[state.n_beacons_placed];
+			
+			b.pos.x = state.renderTarget->mapPixelToCoords(pos).x;
+			b.pos.y = state.renderTarget->mapPixelToCoords(pos).y;
+			b.calibration_sample = 0;
+			b.sum_sample = {};
 			state.n_beacons_placed++;
 		}
 	}
@@ -184,6 +187,7 @@ void update(State& state) noexcept {
 				avg_readings.clear();
 
 				state.readings.push_back(avg);
+				state.new_reading = true;
 			}
 		}
 		res = read_mail(state);
@@ -196,23 +200,65 @@ void update(State& state) noexcept {
 
 		state.space_res = space_sim(state.gui.space_sim);
 
-		upload_field_texture(state, {0.000065, -0.001500, 0.000783 - 0.000043});
-		upload_field_texture(state, {0.000065, -0.000196, 0.000176 - 0.000043});
+		// upload_field_texture(state, {0.000065, -0.001500, 0.000783 - 0.000043});
+		// upload_field_texture(state, {0.000065, -0.000196, 0.000176 - 0.000043});
 		// upload_field_texture(state, {0.000065, -0.000055, 0.000176 - 0.000043});
 	}
 
 	if (state.gui.want_next_reading) {
 		state.gui.want_next_reading = false;
 
-		upload_field_texture(state, state.readings[state.next_reading].beacons[0]);
+		// upload_field_texture(state, state.readings[state.next_reading].beacons[0]);
 
 		state.next_reading++;
 		if (!state.readings.empty()) state.next_reading %= state.readings.size();
 	}
 
-	state.gui.sample_to_display = std::min(state.gui.sample_to_display, state.readings.size());
+	auto to_draw = state.gui.sample_live ? state.readings.size() - 1 : state.gui.sample_to_display;
 
-	compute_probability_grid(state);
+	if (to_draw < state.readings.size()) {
+		Simulation_Parameters sim_params;
+		sim_params.beacons = state.beacons;
+		sim_params.use_dist = state.gui.use_dist_beacon;
+		sim_params.use_angle = state.gui.use_angle_beacon;
+		sim_params.magnet_strength = state.gui.magnet_strength;
+		sim_params.h = state.gui.magnet_height;
+		sim_params.reading = state.readings[to_draw];
+		sim_params.sensitivity = state.gui.sensitivity;
+
+		auto t1 = seconds();
+		auto sim_res = space_sim(sim_params);
+		compute_probability_grid(state, sim_res);
+		printf("Elapsed %10.8lf\n", seconds() - t1);
+	}
+
+	if (state.new_reading) {
+
+		auto w = (size_t)(state.probability_space_size / state.probability_resolution);
+		auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+		for (size_t trace_mode_i = 0; trace_mode_i < GUI_State::Trace_Mode::Count; ++trace_mode_i) {
+			switch (trace_mode_i) {
+			case GUI_State::Trace_Mode::Max : {
+				size_t max_idx = 0;
+				for (size_t i = 0; i < w * h; ++i)
+					if (state.probability_grid[i] > state.probability_grid[max_idx]) max_idx = i;
+
+				state.estimated_points.push_back({
+					state.probability_space_size * ((max_idx % w) / (w - 1.0) - 0.5),
+					state.probability_space_size * ((max_idx / h) / (h - 1.0) - 0.5)
+				});
+				break;
+			}
+			default: {
+				state.estimated_points.push_back({});
+				break;
+			}
+			}
+		}
+	}
+
+	// state.estimated_points.resize(state.readings.size() * GUI_State::Trace_Mode::Count);
+	state.new_reading = false;
 }
 
 void render(State& state) noexcept {
@@ -258,7 +304,7 @@ void render(State& state) noexcept {
 		shape.setFillColor({255, 0, 0, 255});
 		state.renderTarget->draw(shape);
 	}
-
+	// render_estimation_trace(state);
 	// render_triangulation(state);
 }
 
@@ -303,6 +349,7 @@ void toggle_fullscreen(State& state) noexcept {
 }
 
 void upload_field_texture(State& state, Vector3d r) noexcept {
+#if 0
 	double* gridx = state.space_res->field.data();
 	double* gridy = gridx + state.space_res->field.size() / 3;
 	double* gridz = gridy + state.space_res->field.size() / 3;
@@ -351,4 +398,5 @@ void upload_field_texture(State& state, Vector3d r) noexcept {
 	if (state.gui.field_texture.getSize().x != field_color.getSize().x)
 		state.gui.field_texture.create(field_color.getSize().x, field_color.getSize().y);
 	state.gui.field_texture.update(field_color);
+#endif
 }
