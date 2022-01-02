@@ -9,6 +9,8 @@ Build build(Flags flags) noexcept {
 	b.name = "Driver";
 
 	b.add_source("src/main.cpp");
+	b.add_source_recursively("./../../src/");
+	b.add_header("./../../src/");
 
 	b.add_define("_CRT_SECURE_NO_WARNINGS");
 

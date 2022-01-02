@@ -40,6 +40,8 @@ void render(State& state, GUI_State& gui_state) noexcept {
 		(uint8_t)(temp_col[2] * 255)
 	};
 
+	ImGui::Text("Sample per seconds: %zu", state.last_sps_counter);
+
 	ImGui::SliderDouble("Power", &gui_state.power, 0, 10);
 	ImGui::SliderDouble("Magnet Strength", &gui_state.magnet_strength, 0, 100, "%.7f", 6);
 	ImGui::SliderDouble("Magnet Height", &gui_state.magnet_height, 0, 0.10);

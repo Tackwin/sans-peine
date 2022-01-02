@@ -1,3 +1,4 @@
+
 #include "Ease.hpp"
 
 EASE_WATCH_ME;
@@ -12,6 +13,8 @@ Build build(Flags flags) noexcept {
 	b.add_source_recursively("./src/");
 	b.add_header("./src/");
 	b.add_header("./include/");
+	b.add_source_recursively("./../src/");
+	b.add_header("./../src/");
 
 	b.add_library_path("./lib/");
 	b.add_library("sfml-graphics-s");

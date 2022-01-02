@@ -48,6 +48,10 @@ struct State {
 	double probability_space_size = 0.5;
 
 	std::vector<Vector2d> estimated_points;
+
+	double last_sps_timestamp = 0;
+	size_t curr_sps_counter = 0;
+	size_t last_sps_counter = 0;
 };
 
 extern void render_triangulation(State& state) noexcept;

@@ -71,11 +71,12 @@ void setup() {
 			continue;
 		}
 		serial_printf(".");
+		
 		beacons[i].setSamples(HMC5883L_SAMPLES_1);
 		serial_printf(".");
 		beacons[i].setRange(HMC5883L_RANGE_8_1GA);
 		serial_printf(".");
-		beacons[i].setDataRate(HMC5883L_DATARATE_75HZ);
+		beacons[i].setDataRate(HMC5883L_DATARATE_3HZ);
 		serial_printf(".\n");
 		serial_printf("Initialized %d\n", (int)i);
 

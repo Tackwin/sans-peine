@@ -7,7 +7,7 @@ inline double fast_atan(double z) {
 
 inline double fast_atan2(double y, double x) {
 	if (x != 0.0f) {
-		if (fabsf(x) > fabsf(y)) {
+		if (fabs(x) > fabs(y)) {
 			auto z = y / x;
 			if (x > 0.0) {
 				// atan2(y,x) = atan(y/x) if x > 0

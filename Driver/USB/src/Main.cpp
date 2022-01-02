@@ -8,6 +8,9 @@
 #define NOMINMAX
 #include "Windows.h"
 
+#include "Definitions.hpp"
+#include "IPC.hpp"
+
 template<typename T>
 T min(T a, T b) noexcept { return a > b ? a : b; }
 
@@ -204,37 +207,6 @@ int32_t read_int32(const std::vector<std::uint8_t>& buf, size_t i) noexcept {
 	return *reinterpret_cast<const int32_t*>(buf.data() + i);
 }
 
-struct Vector3d {
-	double x, y, z;
-};
-
-#pragma pack(1)
-struct Reading {
-	static constexpr size_t N_Beacons = 6;
-	Vector3d beacons[N_Beacons];
-	bool pressed;
-};
-constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
-
-HANDLE open_slot() noexcept {
-	auto mail_slot = CreateFileA(
-		Mail_Name,
-		GENERIC_WRITE,
-		FILE_SHARE_READ,
-		nullptr,
-		OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL,
-		nullptr
-	);
-
-	if (mail_slot == INVALID_HANDLE_VALUE) {
-		fprintf(stderr, "Error while opening mail slot\n");
-		fprintf(stderr, "CreateFile failed with %d.\n", GetLastError());
-	}
-
-	return mail_slot;
-}
-
 void append_to(const char* filename, void* data, size_t n_data) {
 	auto f = fopen(filename, "ab");
 	if (!f) return;
@@ -242,7 +214,6 @@ void append_to(const char* filename, void* data, size_t n_data) {
 	fwrite(data, 1, n_data, f);
 	fclose(f);
 }
-
 
 std::vector<Reading> replay(const char* filename) {
 	auto f = fopen(filename, "rb");
@@ -287,7 +258,12 @@ constexpr auto Reading_Byte_Size =
 
 int main(int argc, char** argv) {
 	Opts opts = Opts::parse(argc - 1, argv + 1);
-	HANDLE mail_slot = open_slot();
+	auto mail_slot = open_slot(Mail_Name);
+	if (!mail_slot) mail_slot = make_slot(Mail_Name);
+	if (!mail_slot) {
+		printf("Couldn't open mail slot :'(\n");
+		return -1;
+	}
 
 	if (opts.replay) {
 		auto read = replay(opts.replay);
@@ -313,11 +289,11 @@ int main(int argc, char** argv) {
 			if (memcmp(vec.data() + offset, Sync_Seq, N_Sync_Seq) == 0) break;
 
 		if (offset > 0) {
-			printf("Ignored %.*s\n", offset, vec.data());
+			printf("Ignored %.*s\n", (int)offset, vec.data());
 		}
 
 		Reading r;
-		bool reading_ready[Reading::N_Beacons] = { false };
+		bool reading_ready[N_Beacons] = { false };
 		for (
 			size_t i = offset;
 			i + sizeof(Inputs_MAG3110) < vec.size();
@@ -349,10 +325,10 @@ int main(int argc, char** argv) {
 			r.beacons[in.id].y = ty;
 			r.beacons[in.id].z = tz;
 
-			if (memchr(reading_ready, 0, Reading::N_Beacons) == NULL) {
+			if (memchr(reading_ready, 0, N_Beacons) == NULL) {
 				r.pressed = true;
 				readings.push_back(r);
-				memset(reading_ready, 0, Reading::N_Beacons);
+				memset(reading_ready, 0, N_Beacons);
 			}
 
 			printf(

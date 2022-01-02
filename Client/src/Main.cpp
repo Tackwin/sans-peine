@@ -16,9 +16,10 @@
 #include "GUI.hpp"
 #include "Physics.hpp"
 
+#include "IPC.hpp"
+
 void toggle_fullscreen(State& state) noexcept;
 
-void make_slot(State& state) noexcept;
 std::optional<Reading> read_mail(State& state) noexcept;
 void update(State& state) noexcept;
 void render(State& state) noexcept;
@@ -29,7 +30,16 @@ void upload_field_texture(State& state, Vector3d readings) noexcept;
 // Main code
 int main(int, char**) {
 	State state;
-	make_slot(state);
+
+	state.mail_slot = open_slot(Mail_Name);
+	if (!state.mail_slot) state.mail_slot = make_slot(Mail_Name);
+	if (!state.mail_slot) {
+		printf("couldn't open mail slot :(\n");
+		return -1;
+	}
+
+	state.last_sps_timestamp = seconds();
+
 	state.probability_grid = (double*)malloc(
 		(size_t)(state.probability_space_size / state.probability_resolution) *
 		(size_t)(state.probability_space_size / state.probability_resolution) *
@@ -56,6 +66,7 @@ int main(int, char**) {
 
 	sf::Clock delta_clock;
 	std::optional<sf::Vector2i> last_mouse_pos;
+
 	while (window.isOpen()) {
 		auto dt = delta_clock.restart().asSeconds();
 		sf::Event event;
@@ -171,6 +182,7 @@ void update(State& state) noexcept {
 				b.std.y = std::sqrt(b.std.y * f);
 				b.std.z = std::sqrt(b.std.z * f);
 			}
+			state.curr_sps_counter += 1;
 		} else {
 			avg_readings.push_back(*res);
 			if (avg_readings.size() >= state.gui.oversampling) {
@@ -188,6 +200,8 @@ void update(State& state) noexcept {
 
 				state.readings.push_back(avg);
 				state.new_reading = true;
+
+				state.curr_sps_counter += 1;
 			}
 		}
 		res = read_mail(state);
@@ -299,6 +313,12 @@ void update(State& state) noexcept {
 
 	// state.estimated_points.resize(state.readings.size() * GUI_State::Trace_Mode::Count);
 	state.new_reading = false;
+
+	if (seconds() - state.last_sps_timestamp > 1) {
+		state.last_sps_counter = state.curr_sps_counter;
+		state.curr_sps_counter = 0;
+		state.last_sps_timestamp = seconds();
+	}
 }
 
 void render(State& state) noexcept {
@@ -346,15 +366,6 @@ void render(State& state) noexcept {
 	}
 	render_estimation_trace(state);
 	// render_triangulation(state);
-}
-
-void make_slot(State& state) noexcept {
-	state.mail_slot = CreateMailslotA(Mail_Name, 0, 1, nullptr);
-
-	if (state.mail_slot == INVALID_HANDLE_VALUE) {
-		fprintf(stderr, "Error creating mail slot\n");
-		std::terminate();
-	}
 }
 
 std::optional<Reading> read_mail(State& state) noexcept {
