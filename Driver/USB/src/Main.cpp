@@ -232,23 +232,6 @@ std::vector<Reading> replay(const char* filename) {
 	return result;
 }
 
-void send_over_mail(
-	HANDLE mail_slot, Reading readings
-) noexcept {
-	DWORD cbWritten;
-
-	auto fResult = WriteFile(
-		mail_slot,
-		reinterpret_cast<const char*>(&readings),
-		sizeof(readings),
-		&cbWritten,
-		nullptr
-	);
-
-	if (!fResult) {
-		// fprintf(stderr, "Write failed with %d.\n", GetLastError());
-	}
-}
 constexpr auto Reading_Byte_Size =
 #if 0 // DRV425
 	sizeof(Inputs_DRV425);
@@ -258,8 +241,8 @@ constexpr auto Reading_Byte_Size =
 
 int main(int argc, char** argv) {
 	Opts opts = Opts::parse(argc - 1, argv + 1);
-	auto mail_slot = open_slot(Mail_Name);
-	if (!mail_slot) mail_slot = make_slot(Mail_Name);
+	auto mail_slot = IPC::open_slot(Mail_Name);
+	if (!mail_slot) mail_slot = IPC::make_slot(Mail_Name);
 	if (!mail_slot) {
 		printf("Couldn't open mail slot :'(\n");
 		return -1;
@@ -342,7 +325,7 @@ int main(int argc, char** argv) {
 
 #endif
 		}
-		for (auto& x : readings) send_over_mail(mail_slot, x);
+		for (auto& x : readings) IPC::write(mail_slot, &x, sizeof(x));
 
 		if (opts.record)
 			append_to(opts.record, readings.data(), readings.size() * sizeof(Reading));

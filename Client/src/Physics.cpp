@@ -337,16 +337,33 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 				x * x + y * y + result.input_parameters.h * result.input_parameters.h / 4
 			);
 
-			size_t t = (size_t)(d / result.input_parameters.distance_step);
-			if (t < result.input_parameters.distance_resolution)
-				state.probability_grid[idx] *= result.distance_fields[t][b_idx];
+			size_t t_low  = (size_t)std::floor(d / result.input_parameters.distance_step);
+			size_t t_high = (size_t)std::ceil(d / result.input_parameters.distance_step);
+			double t = d / result.input_parameters.distance_step;
+			t = (t - t_low) / (t_high - t_low);
+
+			if (t_high < result.input_parameters.distance_resolution) {
+				auto a = result.distance_fields[t_low ][b_idx];
+				auto b = result.distance_fields[t_high][b_idx];
+
+				state.probability_grid[idx] *= a * (1 - t) + b * t;
+			}
 
 			double a = PI / 2;
 			if (x != 0) a = (PI/2 - fast_atan2(y, x));
 			if (a < 0) a += 2 * PI;
 
-			t = (size_t)(result.input_parameters.distance_resolution * a / (2 * PI));
-			state.probability_grid[idx] *= result.angle_fields[t][b_idx];
+			t_low  = (size_t)std::floor(result.input_parameters.distance_resolution * a / (2 * PI));
+			t_high = (size_t)std::ceil(result.input_parameters.distance_resolution * a / (2 * PI));
+			t = result.input_parameters.distance_resolution * a / (2 * PI);
+			t = (t - t_low) / (t_high - t_low);
+
+			if (t_high < result.input_parameters.angle_resolution) {
+				auto a = result.angle_fields[t_low ][b_idx];
+				auto b = result.angle_fields[t_high][b_idx];
+
+				state.probability_grid[idx] *= a * (1 - t) + b * t;
+			}
 		}
 
 		frame_debug_values.add_to_distribution("p", state.probability_grid[idx]);

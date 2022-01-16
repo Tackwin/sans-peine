@@ -31,8 +31,8 @@ void upload_field_texture(State& state, Vector3d readings) noexcept;
 int main(int, char**) {
 	State state;
 
-	state.mail_slot = open_slot(Mail_Name);
-	if (!state.mail_slot) state.mail_slot = make_slot(Mail_Name);
+	state.mail_slot = IPC::open_slot(Mail_Name);
+	if (!state.mail_slot) state.mail_slot = IPC::make_slot(Mail_Name);
 	if (!state.mail_slot) {
 		printf("couldn't open mail slot :(\n");
 		return -1;
@@ -369,21 +369,10 @@ void render(State& state) noexcept {
 }
 
 std::optional<Reading> read_mail(State& state) noexcept {
-	DWORD cbRead = 0;
-	BOOL fResult;
+	Reading r;
 
-	Reading result;
-
-	fResult = ReadFile(state.mail_slot, &result, sizeof(result), &cbRead, nullptr);
-
-	if (cbRead < sizeof(Reading)) return std::nullopt;
-
-	if (!fResult) {
-		fprintf(stderr, "ReadFile failed with %d.\n", (int)GetLastError());
-		return std::nullopt;
-	}
-
-	return result;
+	if (IPC::read(state.mail_slot, &r, sizeof(r))) return r;
+	return std::nullopt;
 }
 
 void toggle_fullscreen(State& state) noexcept {
