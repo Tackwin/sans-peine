@@ -41,14 +41,6 @@ exit
 #define EASE_HPP
 
 #define _CRT_SECURE_NO_WARNINGS
-#include <map>
-#include <cmath>
-#include <atomic>
-#include <vector>
-#include <string>
-#include <optional>
-#include <filesystem>
-#include <unordered_map>
 
 #ifndef EASE_NAMESPCE
 #define EASE_NAMESPACE Ease

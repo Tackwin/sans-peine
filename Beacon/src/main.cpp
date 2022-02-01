@@ -3,6 +3,11 @@
 #include "HMC5883L.h"
 #include "TCA9548.h"
 
+#include <math.h>
+
+constexpr size_t N_Beacons = 4;
+constexpr size_t N_Sync_Seq = 16;
+
 // HMC5883L
 // 2 mG RMS
 // 75 hz
@@ -16,9 +21,6 @@
 // 1.5 mG RMS
 // 125 hZ
 // +- 16 G
-
-
-constexpr auto N_Sync_Seq = 32;
 
 void serial_printf(const char *fmt, ...) {
 	va_list va;
@@ -36,7 +38,6 @@ void use_bus(uint8_t bus) noexcept {
 	Wire.endTransmission();
 }
 
-constexpr size_t N_Beacons = 6;
 HMC5883L beacons[N_Beacons];
 bool healthy[N_Beacons] = { false };
 
@@ -47,7 +48,7 @@ size_t BUS_MAP[] = {2, 3, 4, 5, 6, 7, 6, 7};
 void setup() {
 	Wire.setWireTimeout(1000);
 	Wire.begin();
-	Serial.begin(115200);
+	Serial.begin(128000);
 
 	HMC5883L beacon_test;
 	if (!beacon_test.begin()) {
@@ -84,19 +85,21 @@ void setup() {
 }
 
 struct __attribute__((packed)) Output {
-
 	uint8_t sync[N_Sync_Seq];
-	uint8_t id;
 	float x;
 	float y;
 	float z;
+	uint8_t id;
 };
-
+#undef round
 void send_mag(uint8_t id, float x, float y, float z) noexcept {
 	Output out;
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync[i] = i;
 	out.id = id;
+	//out.x = (int16_t)round(cbrt(100000 * (double)x));
+	//out.y = (int16_t)round(cbrt(100000 * (double)y));
+	//out.z = (int16_t)round(cbrt(100000 * (double)z));
 	out.x = x;
 	out.y = y;
 	out.z = z;

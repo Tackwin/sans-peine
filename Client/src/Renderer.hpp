@@ -31,7 +31,7 @@ struct State {
 	bool fullscreen = false;
 
 	std::vector<Reading> readings;
-	bool new_reading = false;
+	std::vector<Reading> new_readings;
 
 	float zoom_level = 1.f;
 	sf::Vector2f camera_pos = {};

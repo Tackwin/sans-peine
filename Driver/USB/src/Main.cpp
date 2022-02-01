@@ -72,7 +72,7 @@ Serial_Port::Serial_Port(std::string name) noexcept : name(std::move(name)) {
 		return;
 	}
 
-	platform.baud_rate = CBR_115200;
+	platform.baud_rate = CBR_128000;
 	dcb.BaudRate = platform.baud_rate;
 	dcb.ByteSize = 8;
 	dcb.StopBits = ONESTOPBIT;
@@ -148,7 +148,6 @@ size_t Serial_Port::write(const std::vector<uint8_t>& data) noexcept {
 	return send;
 }
 
-constexpr auto N_Sync_Seq = 32;
 
 #pragma pack(1)
 struct Inputs_DRV425 {
@@ -160,10 +159,10 @@ struct Inputs_DRV425 {
 #pragma pack(1)
 struct Inputs_MAG3110 {
 	std::uint8_t sync[N_Sync_Seq];
-	std::uint8_t id;
 	float x;
 	float y;
 	float z;
+	std::uint8_t id;
 };
 
 struct Opts {
@@ -250,11 +249,10 @@ int main(int argc, char** argv) {
 
 	if (opts.replay) {
 		auto read = replay(opts.replay);
-		for (auto& x : read) send_over_mail(mail_slot, x);
+		for (auto& x : read) IPC::write(mail_slot, &x, sizeof(x));
 
 		return 0;
 	}
-
 
 	Serial_Port serial(opts.com_name);
 	std::vector<Reading> readings;
@@ -263,7 +261,7 @@ int main(int argc, char** argv) {
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
 
 	while (true) {
-		auto vec = serial.wait_read(32 * sizeof(Inputs_MAG3110));
+		auto vec = serial.wait_read(256 * sizeof(Inputs_MAG3110));
 
 		readings.clear();
 		size_t offset{ 0 };
@@ -298,6 +296,11 @@ int main(int argc, char** argv) {
 			Inputs_MAG3110 in =
 				*reinterpret_cast<Inputs_MAG3110*>(vec.data() + i);
 
+			if (in.id >= N_Beacons) {
+				printf("Input corrupted. Skip.\n");
+				continue;
+			}
+
 			double tx = mmag_to_tesla(in.x);
 			double ty = mmag_to_tesla(in.y);
 			double tz = mmag_to_tesla(in.z);
@@ -310,12 +313,13 @@ int main(int argc, char** argv) {
 
 			if (memchr(reading_ready, 0, N_Beacons) == NULL) {
 				r.pressed = true;
+				r.timestamp = seconds();
 				readings.push_back(r);
 				memset(reading_ready, 0, N_Beacons);
 			}
 
 			printf(
-				"Read[%d] % 10.4f MAG(x) % 10.4f MAG(y) % 10.4lf MAG(z) % 10.9lf\n",
+				"Read[%d] % 10.5f IN(x) % 10.5f IN(y) % 10.5f IN(z) % 10.9lf\n",
 				(int)in.id,
 				in.x,
 				in.y,

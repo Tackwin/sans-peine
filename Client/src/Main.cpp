@@ -25,6 +25,8 @@ void update(State& state) noexcept;
 void render(State& state) noexcept;
 void upload_field_texture(State& state, Vector3d readings) noexcept;
 
+Debug_Values perf_values;
+
 #undef main
 
 // Main code
@@ -52,7 +54,7 @@ int main(int, char**) {
 	sf::RenderWindow window(
 		sf::VideoMode(1280, 720), App_Name, sf::Style::Default, state.context_settings
 	);
-	window.setFramerateLimit(60);
+	window.setFramerateLimit(0);
 	ImGui::SFML::Init(window);
 
 	state.renderTarget = &window;
@@ -120,6 +122,8 @@ int main(int, char**) {
 		window.clear();
 		render(state);
 		render(state, state.gui);
+		render(frame_debug_values); frame_debug_values.reset();
+		render(perf_values);
 
 		ImGui::SFML::Render(window);
 		window.display();
@@ -152,7 +156,6 @@ void update(State& state) noexcept {
 
 	auto res = read_mail(state);
 	while(res) {
-
 		if (state.gui.calibrating) {
 			for (size_t i = 0; i < N_Beacons; ++i) {
 				auto& b = state.beacons[i];
@@ -198,8 +201,7 @@ void update(State& state) noexcept {
 
 				avg_readings.clear();
 
-				state.readings.push_back(avg);
-				state.new_reading = true;
+				state.new_readings.push_back(avg);
 
 				state.curr_sps_counter += 1;
 			}
@@ -228,62 +230,56 @@ void update(State& state) noexcept {
 		if (!state.readings.empty()) state.next_reading %= state.readings.size();
 	}
 
-	auto to_draw = state.gui.sample_live ? state.readings.size() - 1 : state.gui.sample_to_display;
-
-	if (to_draw < state.readings.size()) {
+	constexpr size_t Max_New_Per_Frame = 10;
+	size_t i_new_per_frame = 0;
+	for (auto new_reading : state.new_readings) {
 		Simulation_Parameters sim_params;
 		sim_params.beacons = state.beacons;
 		sim_params.use_dist = state.gui.use_dist_beacon;
 		sim_params.use_angle = state.gui.use_angle_beacon;
 		sim_params.magnet_strength = state.gui.magnet_strength;
 		sim_params.h = state.gui.magnet_height;
-		sim_params.reading = state.readings[to_draw];
+		sim_params.reading = new_reading;
 		sim_params.sensitivity = state.gui.sensitivity;
 
+		auto start = seconds();
 		auto t1 = seconds();
 		auto sim_res = space_sim(sim_params);
 		compute_probability_grid(state, sim_res);
-		// printf("Elapsed %10.8lf\n", seconds() - t1);
-	}
-
-	if (state.new_reading) {
-
+  
 		auto w = (size_t)(state.probability_space_size / state.probability_resolution);
 		auto h = (size_t)(state.probability_space_size / state.probability_resolution);
-		for (size_t trace_mode_i = 0; trace_mode_i < GUI_State::Trace_Mode::Count; ++trace_mode_i) {
-			switch (trace_mode_i) {
-			case GUI_State::Trace_Mode::Max : {
-				size_t max_idx = 0;
-				for (size_t i = 0; i < w * h; ++i)
-					if (state.probability_grid[i] > state.probability_grid[max_idx]) max_idx = i;
 
-				state.estimated_points.push_back({
-					state.probability_space_size * ((max_idx % w) / (w - 1.0) - 0.5),
-					state.probability_space_size * ((max_idx / h) / (h - 1.0) - 0.5)
-				});
-				break;
+		auto max_trace = [&] {
+			size_t max_idx = 0;
+			for (size_t i = 0; i < w * h; ++i)
+				if (state.probability_grid[i] > state.probability_grid[max_idx]) max_idx = i;
+
+			state.estimated_points.push_back({
+				state.probability_space_size * ((max_idx % w) / (w - 1.0) - 0.5),
+				state.probability_space_size * ((max_idx / h) / (h - 1.0) - 0.5)
+			});
+		};
+		auto avg_trace = [&] {
+			Vector2d sum = {};
+			long double norm = 0;
+			for (size_t i = 0; i < w * h; ++i) norm += state.probability_grid[i];
+
+			for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+				auto px = xi / (w - 1.0) - 0.5;
+				auto py = yi / (h - 1.0) - 0.5;
+
+				px *= state.probability_space_size * 1;
+				py *= state.probability_space_size * 1;
+
+				auto p = state.probability_grid[xi + yi * w] / norm;
+				sum.x += p * px;
+				sum.y += p * py;
 			}
-			case GUI_State::Trace_Mode::Avg : {
-				Vector2d sum = {};
-				long double norm = 0;
-				for (size_t i = 0; i < w * h; ++i) norm += state.probability_grid[i];
 
-				for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
-					auto px = xi / (w - 1.0) - 0.5;
-					auto py = yi / (h - 1.0) - 0.5;
-
-					px *= state.probability_space_size * 1;
-					py *= state.probability_space_size * 1;
-
-					auto p = state.probability_grid[xi + yi * w] / norm;
-					sum.x += p * px;
-					sum.y += p * py;
-				}
-
-				state.estimated_points.push_back(sum);
-				break;
-			}
-			case GUI_State::Trace_Mode::Avg2 : {
+			state.estimated_points.push_back(sum);
+		};
+		auto avg2_trace = [&] {
 				Vector2d sum = {};
 				long double norm = 0;
 
@@ -305,14 +301,20 @@ void update(State& state) noexcept {
 				sum.y /= norm;
 
 				state.estimated_points.push_back(sum);
-				break;
-			}
-			}
-		}
-	}
+		};
 
-	// state.estimated_points.resize(state.readings.size() * GUI_State::Trace_Mode::Count);
-	state.new_reading = false;
+		max_trace();
+		avg_trace();
+		avg2_trace();
+		auto elapsed = seconds() - start;
+		perf_values.add_to_distribution("All", elapsed);
+		state.readings.push_back(new_reading);
+
+		if (++i_new_per_frame > Max_New_Per_Frame) break;
+	}
+	state.new_readings.erase(
+		std::begin(state.new_readings), std::begin(state.new_readings) + i_new_per_frame
+	);
 
 	if (seconds() - state.last_sps_timestamp > 1) {
 		state.last_sps_counter = state.curr_sps_counter;

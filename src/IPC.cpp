@@ -1,11 +1,12 @@
 #include "IPC.hpp"
 
 #include <stdio.h>
+#include <string>
 
 HANDLE IPC::open_slot(const char* mail_name) noexcept {
 	auto mail_slot = CreateFileA(
 		mail_name,
-		GENERIC_WRITE,
+		GENERIC_WRITE | GENERIC_READ,
 		FILE_SHARE_READ,
 		nullptr,
 		OPEN_EXISTING,
@@ -14,8 +15,8 @@ HANDLE IPC::open_slot(const char* mail_name) noexcept {
 	);
 
 	if (mail_slot == INVALID_HANDLE_VALUE) {
-		fprintf(stderr, "Error while opening mail slot\n");
-		fprintf(stderr, "CreateFile failed with %d.\n", GetLastError());
+		// fprintf(stderr, "Error while opening mail slot\n");
+		// fprintf(stderr, "CreateFile failed with %d.\n", GetLastError());
 		return 0;
 	}
 
@@ -26,7 +27,7 @@ HANDLE IPC::make_slot(const char* mail_name) noexcept {
 	auto mail_slot = CreateMailslotA(mail_name, 0, 0, nullptr);
 
 	if (mail_slot == INVALID_HANDLE_VALUE) {
-		fprintf(stderr, "Error creating mail slot\n");
+		// fprintf(stderr, "Error creating mail slot\n");
 		return 0;
 	}
 
@@ -39,7 +40,10 @@ bool IPC::read(HANDLE mail_slot, void* dst, size_t sz) noexcept {
 
 	fResult = ReadFile(mail_slot, dst, sz, &cbRead, nullptr);
 
-	if (!fResult) return false;
+	if (!fResult) {
+		// fprintf(stderr, "ReadFile failed with %d.\n", GetLastError());
+		return false;
+	}
 
 	return cbRead == sz;
 }
@@ -49,6 +53,9 @@ bool IPC::write(HANDLE mail_slot, void* src, size_t sz) noexcept {
 
 	auto fResult = WriteFile(mail_slot, src, sz, &cbWritten, nullptr);
 
-	if (!fResult) return false;
+	if (!fResult) {
+		// fprintf(stderr, "WriteFile failed with %d.\n", GetLastError());
+		return false;
+	}
 	return cbWritten == sz;
 }

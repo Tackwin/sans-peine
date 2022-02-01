@@ -67,8 +67,7 @@ void render(State& state, GUI_State& gui_state) noexcept {
 			auto t = 0.5 - n / (N_Beacons - 1.0);
 
 			state.beacons[state.n_beacons_placed] = {};
-			state.beacons[state.n_beacons_placed].pos.x = std::get<0>(Beacons_Pos[n]);
-			state.beacons[state.n_beacons_placed].pos.y = std::get<1>(Beacons_Pos[n]);
+			state.beacons[state.n_beacons_placed].pos = Beacons_Pos[n];
 			state.n_beacons_placed++;
 		}
 	}
@@ -196,51 +195,6 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	}
 
 
-	if (ImGui::Begin("Debug values", &gui_state.debug_opened)) {
-		for (auto& [name, values] : frame_debug_values.histograms) if (values.size() > 1) {
-
-			ImGui::Separator();
-			ImGui::Text("%s", name);
-
-			auto min_v = values.front();
-			auto max_v = values.front();
-
-			for (auto& x : values) min_v = std::min(x, min_v);
-			for (auto& x : values) max_v = std::max(x, max_v);
-
-			auto n_bins = (size_t)(std::log2(values.size()) + 0.5);
-			auto dt = (max_v - min_v) / n_bins;
-
-			struct User_Ptr { std::vector<double>& values; double min_v; double max_v; double dt; };
-
-			User_Ptr user_ptr = { values, min_v, max_v, dt };
-
-			ImGui::Text("Min Max: %10.8lf %10.8lf", min_v, max_v);
-			ImGui::PlotHistogram("", [](void* data, int idx) -> float {
-				User_Ptr& user_ptr = *(User_Ptr*)data;
-
-				double s = 0;
-				for (auto& x : user_ptr.values) {
-					if (
-						user_ptr.min_v + idx * user_ptr.dt <= x &&
-						x < user_ptr.min_v + (idx + 1) * user_ptr.dt
-					) s += 1;
-				}
-
-				return s;
-			}, &user_ptr, n_bins, 0, 0, FLT_MAX, FLT_MAX, {0, 200});
-		} else if (values.size() == 1) {
-			ImGui::Separator();
-			ImGui::Text("%s %10.8lf", name, values.front());
-		}
-
-		ImGui::Separator();
-		ImGui::Separator();
-
-		for (auto& [n, x] : frame_debug_values.values) ImGui::Text("%s %10.8lf", n, x);
-	}
-	frame_debug_values.reset();
-	ImGui::End();
 
 
 	ImGui::End();
@@ -338,4 +292,56 @@ void Debug_Values::add_to_distribution(const char* name, double x) noexcept {
 
 void Debug_Values::watch(const char* name, double x) noexcept {
 	values[name] = x;
+}
+
+void render(Debug_Values& debug_values) noexcept {
+	thread_local bool debug_opened = true;
+	if (ImGui::Begin("Debug values", &debug_opened)) {
+		for (auto& [name, values] : debug_values.histograms) if (values.size() > 1) {
+
+			ImGui::Separator();
+			ImGui::Text("%s", name);
+
+			auto min_v = values.front();
+			auto max_v = values.front();
+			auto avg_v = 0.0;
+
+			for (auto& x : values) min_v = std::min(x, min_v);
+			for (auto& x : values) max_v = std::max(x, max_v);
+			for (auto& x : values) avg_v += x;
+
+			avg_v /= values.size();
+
+			auto n_bins = (size_t)(std::log2(values.size()) + 0.5);
+			auto dt = (max_v - min_v) / n_bins;
+
+			struct User_Ptr { std::vector<double>& values; double min_v; double max_v; double dt; };
+
+			User_Ptr user_ptr = { values, min_v, max_v, dt };
+
+			ImGui::Text("Min Avg Max: % 10.8lf % 10.8lf % 10.8lf", min_v, avg_v, max_v);
+			ImGui::PlotHistogram("", [](void* data, int idx) -> float {
+				User_Ptr& user_ptr = *(User_Ptr*)data;
+
+				double s = 0;
+				for (auto& x : user_ptr.values) {
+					if (
+						user_ptr.min_v + idx * user_ptr.dt <= x &&
+						x < user_ptr.min_v + (idx + 1) * user_ptr.dt
+					) s += 1;
+				}
+
+				return s;
+			}, &user_ptr, n_bins, 0, 0, FLT_MAX, FLT_MAX, {0, 200});
+		} else if (values.size() == 1) {
+			ImGui::Separator();
+			ImGui::Text("%s %10.8lf", name, values.front());
+		}
+
+		ImGui::Separator();
+		ImGui::Separator();
+
+		for (auto& [n, x] : debug_values.values) ImGui::Text("%s %10.8lf", n, x);
+	}
+	ImGui::End();
 }

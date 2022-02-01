@@ -2,14 +2,6 @@
 
 #include "Constants.hpp"
 
-struct Vector2d {
-	double x, y = 0;
-};
-
-struct Vector3d {
-	double x, y, z = 0;
-};
-
 static Vector3d operator+(Vector3d a, Vector3d b) noexcept {
 	return { a.x + b.x, a.y + b.y, a.z + b.z };
 }
@@ -28,6 +20,7 @@ static Vector3d& operator/=(Vector3d& a, double n) noexcept {
 struct Reading {
 	Vector3d beacons[N_Beacons] = { 0 };
 	bool pressed;
+	double timestamp = 0;
 };
 
 struct Beacon {

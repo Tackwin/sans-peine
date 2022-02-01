@@ -16,7 +16,6 @@ struct Debug_Values {
 
 extern Debug_Values frame_debug_values;
 
-
 struct GUI_State {
 	double power = 3.0;
 	double grid = 0.02;
@@ -62,3 +61,4 @@ struct GUI_State {
 
 struct State;
 extern void render(State& state, GUI_State& gui_state) noexcept;
+extern void render(Debug_Values& debug_values) noexcept;

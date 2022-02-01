@@ -2,7 +2,8 @@
 
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr double u0 = 1.225663753e-6;
-constexpr size_t N_Beacons = 6;
+constexpr size_t N_Beacons = 4;
+constexpr size_t N_Sync_Seq = 16;
 
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
 constexpr const char* App_Name = "SP Client";
@@ -13,16 +14,24 @@ struct array_view {
 	size_t count = 0;
 };
 
-constexpr std::tuple<double, double> Beacons_Pos[] = {
-	{+0.00, -0.06},
-	{+0.00, -0.04},
-	{+0.00, -0.02},
-	{+0.00, +0.02},
-	{+0.00, +0.04},
-	{+0.00, +0.06},
+struct Vector2d {
+	double x, y = 0;
 };
 
-constexpr std::tuple<double, double, double> Viridis_Color_Map[] = {
+struct Vector3d {
+	double x, y, z = 0;
+};
+
+constexpr Vector2d Beacons_Pos[] = {
+	{+0.00, +0.06},
+	{+0.00, +0.04},
+	// {+0.00, +0.02},
+	// {+0.00, -0.02},
+	{+0.00, -0.04},
+	{+0.00, -0.06},
+};
+
+constexpr Vector3d Viridis_Color_Map[] = {
 	{ 0.267004, 0.004874, 0.329415 },
 	{ 0.268510, 0.009605, 0.335427 },
 	{ 0.269944, 0.014625, 0.341379 },

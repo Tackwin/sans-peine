@@ -1,7 +1,4 @@
-
 #include "Ease.hpp"
-
-EASE_WATCH_ME;
 
 Build build(Flags flags) noexcept {
 	auto b = Build::get_default(flags);
