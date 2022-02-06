@@ -15,10 +15,13 @@
 #include "Renderer.hpp"
 #include "GUI.hpp"
 #include "Physics.hpp"
+#include "Macro.hpp"
 
 #include "IPC.hpp"
 
 void toggle_fullscreen(State& state) noexcept;
+
+void load_drivers_into(std::vector<Driver_Interface>& drivers) noexcept;
 
 std::optional<Reading> read_mail(State& state) noexcept;
 void update(State& state) noexcept;
@@ -32,13 +35,24 @@ Debug_Values perf_values;
 // Main code
 int main(int, char**) {
 	State state;
-
 	state.mail_slot = IPC::open_slot(Mail_Name);
 	if (!state.mail_slot) state.mail_slot = IPC::make_slot(Mail_Name);
 	if (!state.mail_slot) {
 		printf("couldn't open mail slot :(\n");
 		return -1;
 	}
+
+	load_drivers_into(state.loaded_drivers);
+	for (auto& d : state.loaded_drivers) {
+		d.ptr = d.init();
+		state.driver_threads.push_back(std::thread(d.play, d.ptr));
+	}
+	defer {
+		for (auto& d : state.loaded_drivers) {
+			d.shut(d.ptr);
+			FreeLibrary((HINSTANCE)d.lib);
+		}
+	};
 
 	state.last_sps_timestamp = seconds();
 
@@ -154,22 +168,22 @@ void update(State& state) noexcept {
 		}
 	}
 
-	auto res = read_mail(state);
-	while(res) {
+
+	auto handle_reading = [&] (Reading res) {
 		if (state.gui.calibrating) {
 			for (size_t i = 0; i < N_Beacons; ++i) {
 				auto& b = state.beacons[i];
 
 				b.calibration_sample++;
-				b.sum_sample += res->beacons[i];
-				b.sum_dist += std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z);
-				b.sum2_sample.x += res->beacons[i].x * res->beacons[i].x;
-				b.sum2_sample.y += res->beacons[i].y * res->beacons[i].y;
-				b.sum2_sample.z += res->beacons[i].z * res->beacons[i].z;
+				b.sum_sample += res.beacons[i];
+				b.sum_dist += std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
+				b.sum2_sample.x += res.beacons[i].x * res.beacons[i].x;
+				b.sum2_sample.y += res.beacons[i].y * res.beacons[i].y;
+				b.sum2_sample.z += res.beacons[i].z * res.beacons[i].z;
 
 				b.sum2_dist +=
-					std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z) *
-					std::hypot(res->beacons[i].x, res->beacons[i].y, res->beacons[i].z);
+					std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z) *
+					std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
 
 				b.mean.x = b.sum_sample.x / b.calibration_sample;
 				b.mean.y = b.sum_sample.y / b.calibration_sample;
@@ -187,7 +201,7 @@ void update(State& state) noexcept {
 			}
 			state.curr_sps_counter += 1;
 		} else {
-			avg_readings.push_back(*res);
+			avg_readings.push_back(res);
 			if (avg_readings.size() >= state.gui.oversampling) {
 				Reading avg = {};
 				size_t n_pressed = 0;
@@ -206,7 +220,23 @@ void update(State& state) noexcept {
 				state.curr_sps_counter += 1;
 			}
 		}
+	};
+	constexpr size_t Max_New_Per_Frame = 10;
+	size_t i_new_per_frame = 0;
+
+	auto res = read_mail(state);
+	while(res) {
+		handle_reading(*res);
 		res = read_mail(state);
+		if (++i_new_per_frame > Max_New_Per_Frame) break;
+	}
+
+	for (auto& d : state.loaded_drivers) if (d.ptr && d.next) {
+		Reading read;
+		while (d.next(d.ptr, &read)) {
+			handle_reading(read);
+			if (++i_new_per_frame > Max_New_Per_Frame) break;
+		}
 	}
 
 	if (sf::Keyboard::isKeyPressed(sf::Keyboard::R)) state.readings.clear();
@@ -230,8 +260,18 @@ void update(State& state) noexcept {
 		if (!state.readings.empty()) state.next_reading %= state.readings.size();
 	}
 
-	constexpr size_t Max_New_Per_Frame = 10;
-	size_t i_new_per_frame = 0;
+	if (state.gui.want_reset_driver) {
+		state.gui.want_reset_driver = false;
+
+		for (size_t i = 0; i < state.loaded_drivers.size(); ++i) {
+			auto& d = state.loaded_drivers[i];
+			d.shut(d.ptr);
+			d.ptr = d.init();
+			state.driver_threads[i].join();
+			state.driver_threads[i] = std::thread(d.play, d.ptr);
+		}
+	}
+
 	for (auto new_reading : state.new_readings) {
 		Simulation_Parameters sim_params;
 		sim_params.beacons = state.beacons;
@@ -246,7 +286,7 @@ void update(State& state) noexcept {
 		auto t1 = seconds();
 		auto sim_res = space_sim(sim_params);
 		compute_probability_grid(state, sim_res);
-  
+
 		auto w = (size_t)(state.probability_space_size / state.probability_resolution);
 		auto h = (size_t)(state.probability_space_size / state.probability_resolution);
 
@@ -309,12 +349,8 @@ void update(State& state) noexcept {
 		auto elapsed = seconds() - start;
 		perf_values.add_to_distribution("All", elapsed);
 		state.readings.push_back(new_reading);
-
-		if (++i_new_per_frame > Max_New_Per_Frame) break;
 	}
-	state.new_readings.erase(
-		std::begin(state.new_readings), std::begin(state.new_readings) + i_new_per_frame
-	);
+	state.new_readings.clear();
 
 	if (seconds() - state.last_sps_timestamp > 1) {
 		state.last_sps_counter = state.curr_sps_counter;
@@ -441,4 +477,19 @@ void upload_field_texture(State& state, Vector3d r) noexcept {
 		state.gui.field_texture.create(field_color.getSize().x, field_color.getSize().y);
 	state.gui.field_texture.update(field_color);
 #endif
+}
+
+void load_drivers_into(std::vector<Driver_Interface>& drivers) noexcept {
+	HINSTANCE dll = LoadLibraryA("Driver.dll");
+	if (!dll) return;
+
+	Driver_Interface driver;
+	driver.lib = dll;
+	driver.init = (driver_init_f)GetProcAddress(dll, "init");
+	driver.shut = (driver_shut_f)GetProcAddress(dll, "shut");
+	driver.play = (driver_play_f)GetProcAddress(dll, "play");
+	driver.stop = (driver_play_f)GetProcAddress(dll, "stop");
+	driver.next = (driver_next_f)GetProcAddress(dll, "next");
+
+	drivers.push_back(driver);
 }

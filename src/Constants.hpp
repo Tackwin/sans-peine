@@ -1,5 +1,11 @@
 #pragma once
 
+using u32 = unsigned int;
+using u64 = long long unsigned int;
+
+static_assert(sizeof(u32) == 4);
+static_assert(sizeof(u64) == 8);
+
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr double u0 = 1.225663753e-6;
 constexpr size_t N_Beacons = 4;

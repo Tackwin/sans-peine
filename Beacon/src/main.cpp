@@ -107,10 +107,15 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
 }
 
+Vector last_vectors[N_Beacons];
+
 void loop() {
 	for (size_t i = 0; i < N_Beacons; ++i) if (healthy[i]) {
 		multiplexer.selectChannel(BUS_MAP[i]);
 		auto read = beacons[i].readNormalize();
+		if (memcmp(&last_vectors[i], &read, sizeof(read)) == 0) continue;
+
+		last_vectors[i] = read;
 		send_mag((uint8_t)i, read.XAxis, read.YAxis, read.ZAxis);
 	}
 }

@@ -5,9 +5,10 @@
 #include <SFML/Window/Event.hpp>
 
 #include <array>
-#include <vector>
 #include <cmath>
+#include <vector>
 #include <random>
+#include <thread>
 #include <optional>
 
 #include <Windows.h>
@@ -52,6 +53,9 @@ struct State {
 	double last_sps_timestamp = 0;
 	size_t curr_sps_counter = 0;
 	size_t last_sps_counter = 0;
+
+	std::vector<Driver_Interface> loaded_drivers;
+	std::vector<std::thread> driver_threads;
 };
 
 extern void render_triangulation(State& state) noexcept;

@@ -1,16 +1,18 @@
+#define NAME usb
 #include "Ease.hpp"
-
 
 EASE_WATCH_ME;
 
-Build build(Flags flags) noexcept {
+Build usb(Flags flags) noexcept {
 	auto b = Build::get_default(flags);
+
+	b.target = Ease::Build::Target::Shared;
 
 	b.name = "Driver";
 
-	b.add_source("src/main.cpp");
-	b.add_source_recursively("./../../src/");
-	b.add_header("./../../src/");
+	b.add_source("Driver/USB/src/main.cpp");
+	b.add_source_recursively("src/");
+	b.add_header("src/");
 
 	b.add_define("_CRT_SECURE_NO_WARNINGS");
 	b.add_library("opengl32");

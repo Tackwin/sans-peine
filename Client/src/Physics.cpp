@@ -2,6 +2,7 @@
 #include <cmath>
 #include "Renderer.hpp"
 #include <cmath>
+
 #include "Macro.hpp"
 
 #include "fast_math.hpp"

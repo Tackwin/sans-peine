@@ -46,3 +46,21 @@ static double seconds() noexcept {
 	// return the number of seconds
 	return seconds.count() / 1'000'000'000.0;
 }
+
+using driver_init_f = void*(*)();
+using driver_shut_f = void(*)(void*);
+
+using driver_play_f = void(*)(void*);
+using driver_stop_f = void(*)(void*);
+using driver_next_f = bool(*)(void*, Reading*);
+
+struct Driver_Interface {
+	void* lib = nullptr;
+	void* ptr = nullptr;
+
+	driver_init_f init = nullptr;
+	driver_shut_f shut = nullptr;
+	driver_play_f play = nullptr;
+	driver_stop_f stop = nullptr;
+	driver_next_f next = nullptr;
+};

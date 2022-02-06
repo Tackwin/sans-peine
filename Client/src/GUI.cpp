@@ -144,7 +144,11 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	ImGui::Separator();
 
 	gui_state.want_compute = false;
+	gui_state.want_reset_driver = false;
 	gui_state.want_next_reading = false;
+
+	gui_state.want_reset_driver = ImGui::Button("Reset driver");
+
 	if (ImGui::CollapsingHeader("Simulation")) {
 		ImGui::PushID("Simulation");
 		ImGui::SliderSize("Resolution", &gui_state.space_sim.resolution, 1, 2000);
