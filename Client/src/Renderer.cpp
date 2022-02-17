@@ -299,15 +299,15 @@ sf::Vector2f line_line(
 
 void update_probability_texture(State& state) noexcept {
 	static sf::Image probability_image;
-	auto w = (size_t)(state.probability_space_size / state.probability_resolution);
-	auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+	auto w = state.display_probability_resolution;
+	auto h = state.display_probability_resolution;
 	probability_image.create(w, h);
 
-	double log_max = -INFINITY;
+	double log_max = 1;
 	double log_min = +INFINITY;
 
 	auto scale = [] (double x) -> double {
-		return std::pow(x, 1/3.0);
+		return x;
 	};
 	auto cmap = [] (double x) -> sf::Color {
 		auto c = (sf::Uint8)(x * 255);
@@ -320,17 +320,22 @@ void update_probability_texture(State& state) noexcept {
 		};
 	};
 
-	for (size_t x = 0; x < probability_image.getSize().x; ++x)
-	for (size_t y = 0; y < probability_image.getSize().y; ++y) {
-		auto it = scale(state.probability_grid[x + y * w]);
+	for (size_t x = 0; x < w; ++x)
+	for (size_t y = 0; y < h; ++y) {
+		size_t xx = (size_t)(state.probability_resolution * x / (1. * w));
+		size_t yy = (size_t)(state.probability_resolution * y / (1. * h));
+
+		auto it = scale(state.probability_grid[xx + yy * state.probability_resolution]);
 		if (log_max < it) log_max = it;
 		if (log_min > it) log_min = it;
 	}
-	for (size_t x = 0; x < probability_image.getSize().x; ++x)
-	for (size_t y = 0; y < probability_image.getSize().y; ++y) {
-		auto it = scale(state.probability_grid[x + y * w]);
+	for (size_t x = 0; x < w; ++x)
+	for (size_t y = 0; y < h; ++y) {
+		size_t xx = (size_t)(state.probability_resolution * x / (1. * w));
+		size_t yy = (size_t)(state.probability_resolution * y / (1. * h));
+		auto it = scale(state.probability_grid[xx + yy * state.probability_resolution]);
 		auto t = (it - log_min) / (log_max - log_min);
-		probability_image.setPixel(x, probability_image.getSize().y - y - 1, cmap(t));
+		probability_image.setPixel(x, h - y - 1, cmap(t));
 	}
 
 	state.probability_texture.loadFromImage(probability_image);

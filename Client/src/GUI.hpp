@@ -43,6 +43,8 @@ struct GUI_State {
 
 	sf::Texture field_texture;
 
+	double epsilon = 1.0;
+
 	size_t sample_to_display = 0;
 	bool sample_live = true;
 

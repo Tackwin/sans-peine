@@ -1,5 +1,6 @@
 
 
+
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -274,7 +275,7 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 	State* state = (State*)ptr;
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
-	buffer.resize(256 * sizeof(Inputs_MAG3110));
+	buffer.resize(32 * sizeof(Inputs_MAG3110));
 
 	while (!state->request_stop) {
 		state->port.wait_read(buffer);

@@ -57,8 +57,8 @@ int main(int, char**) {
 	state.last_sps_timestamp = seconds();
 
 	state.probability_grid = (double*)malloc(
-		(size_t)(state.probability_space_size / state.probability_resolution) *
-		(size_t)(state.probability_space_size / state.probability_resolution) *
+		state.probability_resolution *
+		state.probability_resolution *
 		sizeof(double)
 	);
 	for (size_t i = 0; i < N_Beacons; ++i) state.gui.use_dist_beacon[i] = false;
@@ -287,10 +287,12 @@ void update(State& state) noexcept {
 		auto sim_res = space_sim(sim_params);
 		compute_probability_grid(state, sim_res);
 
-		auto w = (size_t)(state.probability_space_size / state.probability_resolution);
-		auto h = (size_t)(state.probability_space_size / state.probability_resolution);
+		auto w = state.probability_resolution;
+		auto h = state.probability_resolution;
 
 		auto max_trace = [&] {
+			state.estimated_points.push_back({});
+			return;
 			size_t max_idx = 0;
 			for (size_t i = 0; i < w * h; ++i)
 				if (state.probability_grid[i] > state.probability_grid[max_idx]) max_idx = i;
@@ -301,6 +303,8 @@ void update(State& state) noexcept {
 			});
 		};
 		auto avg_trace = [&] {
+			state.estimated_points.push_back({});
+			return;
 			Vector2d sum = {};
 			long double norm = 0;
 			for (size_t i = 0; i < w * h; ++i) norm += state.probability_grid[i];
@@ -320,27 +324,29 @@ void update(State& state) noexcept {
 			state.estimated_points.push_back(sum);
 		};
 		auto avg2_trace = [&] {
-				Vector2d sum = {};
-				long double norm = 0;
+			state.estimated_points.push_back({});
+			return;
+			Vector2d sum = {};
+			long double norm = 0;
 
-				for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
-					auto px = xi / (w - 1.0) - 0.5;
-					auto py = yi / (h - 1.0) - 0.5;
+			for (size_t xi = 0; xi < w; ++xi) for (size_t yi = 0; yi < h; ++yi) {
+				auto px = xi / (w - 1.0) - 0.5;
+				auto py = yi / (h - 1.0) - 0.5;
 
-					px *= state.probability_space_size * 1;
-					py *= state.probability_space_size * 1;
+				px *= state.probability_space_size * 1;
+				py *= state.probability_space_size * 1;
 
-					auto p = state.probability_grid[xi + yi * w];
-					p *= p;
-					norm += p;
-					sum.x += p * px;
-					sum.y += p * py;
-				}
+				auto p = state.probability_grid[xi + yi * w];
+				p *= p;
+				norm += p;
+				sum.x += p * px;
+				sum.y += p * py;
+			}
 
-				sum.x /= norm;
-				sum.y /= norm;
+			sum.x /= norm;
+			sum.y /= norm;
 
-				state.estimated_points.push_back(sum);
+			state.estimated_points.push_back(sum);
 		};
 
 		max_trace();

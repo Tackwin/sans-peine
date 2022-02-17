@@ -18,6 +18,9 @@
 #include "Physics.hpp"
 #include "Definitions.hpp"
 
+constexpr size_t DETAILS[] = { 51, 15, 3 };
+constexpr size_t N_DETAILS = sizeof(DETAILS) / sizeof(DETAILS[0]);
+
 struct State {
 	size_t n_beacons_placed = 0;
 	std::array<Beacon, N_Beacons> beacons;
@@ -45,8 +48,9 @@ struct State {
 
 	sf::Texture probability_texture;
 	double* probability_grid = nullptr;
-	double probability_resolution = 0.001;
 	double probability_space_size = 0.5;
+	size_t probability_resolution = DETAILS[0] * DETAILS[1] * DETAILS[2];
+	size_t display_probability_resolution = 250;
 
 	std::vector<Vector2d> estimated_points;
 
