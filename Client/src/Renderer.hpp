@@ -18,7 +18,7 @@
 #include "Physics.hpp"
 #include "Definitions.hpp"
 
-constexpr size_t DETAILS[] = { 51, 15, 3 };
+constexpr size_t DETAILS[] = { 6, 6, 6 };
 constexpr size_t N_DETAILS = sizeof(DETAILS) / sizeof(DETAILS[0]);
 
 struct State {
@@ -49,8 +49,8 @@ struct State {
 	sf::Texture probability_texture;
 	double* probability_grid = nullptr;
 	double probability_space_size = 0.5;
-	size_t probability_resolution = DETAILS[0] * DETAILS[1] * DETAILS[2];
-	size_t display_probability_resolution = 250;
+	size_t probability_resolution = 256;
+	size_t display_probability_resolution = 128;
 
 	std::vector<Vector2d> estimated_points;
 

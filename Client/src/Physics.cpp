@@ -196,11 +196,8 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 			I(std::sqrt(lambda * x), k / 2 - 1);
 	};
 
-	std::array<double, N_Beacons> def;
-	for (auto& x : def) x = 1;
-
-	result.distance_fields.resize(state.distance_resolution, def);
-	result.angle_fields.resize(state.angle_resolution, def);
+	result.distance_fields.resize(state.distance_resolution * N_Beacons, 1);
+	result.angle_fields.resize(state.angle_resolution * N_Beacons, 1);
 
 	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) if (state.use_dist[b_idx]) {
 		auto& b = state.beacons[b_idx];
@@ -223,7 +220,7 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 			auto c = state.magnet_strength * u0 / (4 * PI);
 
 			auto p = N(c / (d * d * d), u, s) * 3 * c / (d * d * d *d);
-			result.distance_fields[i][b_idx] = p;
+			result.distance_fields[i + b_idx * state.distance_resolution] = p;
 		}
 	}
 
@@ -307,14 +304,12 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 
 			#endif
 
-			result.angle_fields[i][b_idx] = p;
+			result.angle_fields[i + b_idx * state.angle_resolution] = p;
 		}
 	}
 
-	if (result.distance_fields.size() > 0)
-		result.distance_fields.push_back(result.distance_fields.back());
-	if (result.angle_fields.size() > 0)
-		result.angle_fields.push_back(result.angle_fields.back());
+	result.distance_resolution = state.distance_resolution;
+	result.angle_resolution = state.angle_resolution;
 	return result;
 }
 extern Debug_Values perf_values;
@@ -329,83 +324,83 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 	auto hh = state.probability_space_size / (h - 1.0);
 	auto bias = -state.probability_space_size / 2.0;
 
-	for (size_t i = 0; i < w * h; ++i) state.probability_grid[i] = 0;
+	// for (size_t i = 0; i < w * h; ++i) state.probability_grid[i] = 0;
 
-	auto f = [&] (size_t xi, size_t yi) {
-		auto px = xi * ww + bias;
-		auto py = yi * hh + bias;
-		double local_p = 1;
+	// auto f = [&] (size_t xi, size_t yi) {
+	// 	auto px = xi * ww + bias;
+	// 	auto py = yi * hh + bias;
+	// 	double local_p = 1;
 
-		for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) {
-			auto& b = state.beacons[b_idx];
-			auto x = px - b.pos.x;
-			auto y = py - b.pos.y;
+	// 	for (size_t b_idx = 0; b_idx < N_Beacons; ++b_idx) {
+	// 		auto& b = state.beacons[b_idx];
+	// 		auto x = px - b.pos.x;
+	// 		auto y = py - b.pos.y;
 
-			auto d = std::sqrt(x * x + y * y + z);
+	// 		auto d = std::sqrt(x * x + y * y + z);
 
-			int64_t t_low  = (int64_t)(d * distance_freq);
-			double t = d * distance_freq - t_low;
+	// 		int64_t t_low  = (int64_t)(d * distance_freq);
+	// 		double t = d * distance_freq - t_low;
 
-			auto u = result.distance_fields[t_low + 0][b_idx];
-			auto v = result.distance_fields[t_low + 1][b_idx];
+	// 		auto u = result.distance_fields[t_low + 0][b_idx];
+	// 		auto v = result.distance_fields[t_low + 1][b_idx];
 
-			local_p *= u * (1 - t) + v * t;
+	// 		local_p *= u * (1 - t) + v * t;
 
-			double a = PI/2 - fast_atan2(y, x);
-			if (a < 0) a += 2 * PI;
+	// 		double a = PI/2 - fast_atan2(y, x);
+	// 		if (a < 0) a += 2 * PI;
 
-			t_low  = (int64_t)(a * angle_freq);
-			t = a * angle_freq - t_low;
+	// 		t_low  = (int64_t)(a * angle_freq);
+	// 		t = a * angle_freq - t_low;
 
-			u = result.angle_fields[t_low + 0][b_idx];
-			v = result.angle_fields[t_low + 1][b_idx];
+	// 		u = result.angle_fields[t_low + 0][b_idx];
+	// 		v = result.angle_fields[t_low + 1][b_idx];
 
-			local_p *= u * (1 - t) + v * t;
-		}
-		state.probability_grid[xi + yi * w] = std::max(0.0, std::log(local_p)) + rand() / (1.0 * RAND_MAX);
+	// 		local_p *= u * (1 - t) + v * t;
+	// 	}
+	// 	state.probability_grid[xi + yi * w] = std::max(0.0, std::log(local_p)) + rand() / (1.0 * RAND_MAX);
 
-		return local_p;
-	};
+	// 	return local_p;
+	// };
 
 
-	auto F = [&] (size_t lx, size_t hx, size_t ly, size_t hy, size_t d, auto F) {
-		size_t D = DETAILS[d];
-		std::array<double, DETAILS[0] * DETAILS[0]> current_level_samples;
+	// auto F = [&] (size_t lx, size_t hx, size_t ly, size_t hy, size_t d, auto F) {
+	// 	size_t D = DETAILS[d];
+	// 	std::array<double, DETAILS[0] * DETAILS[0]> current_level_samples;
 
-		auto at = [&] (size_t x, size_t y) -> double& { return current_level_samples[x + y * D]; };
+	// 	auto at = [&] (size_t x, size_t y) -> double& { return current_level_samples[x + y * D]; };
 
-		for (size_t xi = lx; xi < hx; xi += (hx - lx) / D)
-		for (size_t yi = ly; yi < hy; yi += (hy - ly) / D) {
-			at(D * (xi - lx) / (hx - lx), D * (yi - ly) / (hy - ly)) = f(xi, yi);
+	// 	for (size_t xi = lx; xi < hx; xi += (hx - lx) / D)
+	// 	for (size_t yi = ly; yi < hy; yi += (hy - ly) / D) {
+	// 		at(D * (xi - lx) / (hx - lx), D * (yi - ly) / (hy - ly)) = f(xi, yi);
 
-		}
+	// 	}
 
-		if (d + 1 >= N_DETAILS) return;
+	// 	if (d + 1 >= N_DETAILS) return;
 
-		auto deeper = [&] (size_t x, size_t y) {
-			F(
-				lx + x * (hx - lx) / D,
-				lx + (x + 1) * (hx - lx) / D,
-				ly + y * (hy - ly) / D,
-				ly + (y + 1) * (hy - ly) / D,
-				d + 1,
-				F
-			);
-		};
+	// 	auto deeper = [&] (size_t x, size_t y) {
+	// 		F(
+	// 			lx + x * (hx - lx) / D,
+	// 			lx + (x + 1) * (hx - lx) / D,
+	// 			ly + y * (hy - ly) / D,
+	// 			ly + (y + 1) * (hy - ly) / D,
+	// 			d + 1,
+	// 			F
+	// 		);
+	// 	};
 
-		bool went_deep[DETAILS[0] * DETAILS[0]] = { false };
-		for (size_t x = 0; x < D; x++) for (size_t y = 0; y < D; y++)
-		{
-			auto a = at(x, y);
-			if (a > state.gui.epsilon) {
-				deeper(x, y);
-			}
-		}
-	};
+	// 	bool went_deep[DETAILS[0] * DETAILS[0]] = { false };
+	// 	for (size_t x = 0; x < D; x++) for (size_t y = 0; y < D; y++)
+	// 	{
+	// 		auto a = at(x, y);
+	// 		if (a > state.gui.epsilon) {
+	// 			deeper(x, y);
+	// 		}
+	// 	}
+	// };
 
-	F(0, w, 0, h, 0, F);
+	// F(0, w, 0, h, 0, F);
 
-	return;
+	// return;
 
 
 	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 1;
@@ -430,8 +425,8 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 			int64_t t_low  = (int64_t)(d * distance_freq);
 			double t = d * distance_freq - t_low;
 
-			auto u = result.distance_fields[t_low + 0][b_idx];
-			auto v = result.distance_fields[t_low + 1][b_idx];
+			auto u = result.distance_fields[t_low + 0 + b_idx * result.distance_resolution];
+			auto v = result.distance_fields[t_low + 1 + b_idx * result.distance_resolution];
 
 			local_p *= u * (1 - t) + v * t;
 
@@ -441,8 +436,8 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 			t_low  = (int64_t)(a * angle_freq);
 			t = a * angle_freq - t_low;
 
-			u = result.angle_fields[t_low + 0][b_idx];
-			v = result.angle_fields[t_low + 1][b_idx];
+			u = result.angle_fields[t_low + 0 + b_idx * result.angle_resolution];
+			v = result.angle_fields[t_low + 1 + b_idx * result.angle_resolution];
 
 			local_p *= u * (1 - t) + v * t;
 		}

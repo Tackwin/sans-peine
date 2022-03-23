@@ -291,8 +291,6 @@ void update(State& state) noexcept {
 		auto h = state.probability_resolution;
 
 		auto max_trace = [&] {
-			state.estimated_points.push_back({});
-			return;
 			size_t max_idx = 0;
 			for (size_t i = 0; i < w * h; ++i)
 				if (state.probability_grid[i] > state.probability_grid[max_idx]) max_idx = i;
@@ -303,8 +301,6 @@ void update(State& state) noexcept {
 			});
 		};
 		auto avg_trace = [&] {
-			state.estimated_points.push_back({});
-			return;
 			Vector2d sum = {};
 			long double norm = 0;
 			for (size_t i = 0; i < w * h; ++i) norm += state.probability_grid[i];
@@ -324,8 +320,6 @@ void update(State& state) noexcept {
 			state.estimated_points.push_back(sum);
 		};
 		auto avg2_trace = [&] {
-			state.estimated_points.push_back({});
-			return;
 			Vector2d sum = {};
 			long double norm = 0;
 
@@ -366,7 +360,14 @@ void update(State& state) noexcept {
 }
 
 void render(State& state) noexcept {
+	thread_local double C_avg = 0;
+	thread_local size_t C_n = 0;
+	auto t = seconds();
 	update_probability_texture(state);
+	C_avg += seconds() - t;
+	C_n++;
+	frame_debug_values.watch("    Upload time", seconds() - t);
+	frame_debug_values.watch("Avg Upload time", C_avg / C_n);
 
 	sf::Sprite probability_sprite;
 	probability_sprite.setTexture(state.probability_texture);

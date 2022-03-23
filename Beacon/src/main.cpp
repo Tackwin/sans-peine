@@ -5,7 +5,7 @@
 
 #include <math.h>
 
-constexpr size_t N_Beacons = 4;
+constexpr size_t N_Beacons = 2;
 constexpr size_t N_Sync_Seq = 16;
 
 // HMC5883L
@@ -42,20 +42,13 @@ HMC5883L beacons[N_Beacons];
 bool healthy[N_Beacons] = { false };
 
 TCA9548 multiplexer(0x70);
-size_t BUS_MAP[] = {2, 3, 4, 5, 6, 7, 6, 7};
+size_t BUS_MAP[] = {7, 6, 4, 5, 6, 7, 6, 7};
 
 
 void setup() {
 	Wire.setWireTimeout(1000);
 	Wire.begin();
 	Serial.begin(128000);
-
-	HMC5883L beacon_test;
-	if (!beacon_test.begin()) {
-		serial_printf("Beacon test FAIL !");
-	} else {
-		serial_printf("Beacon test OK !");
-	}
 
 	bool res = multiplexer.begin();
 	if (!res) {
@@ -113,9 +106,9 @@ void loop() {
 	for (size_t i = 0; i < N_Beacons; ++i) if (healthy[i]) {
 		multiplexer.selectChannel(BUS_MAP[i]);
 		auto read = beacons[i].readNormalize();
-		if (memcmp(&last_vectors[i], &read, sizeof(read)) == 0) continue;
+		// if (memcmp(&last_vectors[i], &read, sizeof(read)) == 0) continue;
 
-		last_vectors[i] = read;
+		// last_vectors[i] = read;
 		send_mag((uint8_t)i, read.XAxis, read.YAxis, read.ZAxis);
 	}
 }

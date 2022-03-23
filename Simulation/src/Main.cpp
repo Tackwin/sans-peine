@@ -23,7 +23,7 @@ constexpr auto PI = 3.1415926;
 constexpr const char* App_Name = "SP Sim";
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
 
-constexpr size_t N_Beacons = 3;
+constexpr size_t N_Beacons = 2;
 struct Reading {
 	double beacons[N_Beacons];
 	bool pressed;

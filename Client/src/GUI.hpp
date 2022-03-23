@@ -14,6 +14,7 @@ struct Debug_Values {
 	void watch(const char* name, double x) noexcept;
 };
 
+extern Debug_Values simulation_debug_values;
 extern Debug_Values frame_debug_values;
 
 struct GUI_State {

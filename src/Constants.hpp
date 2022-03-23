@@ -8,7 +8,7 @@ static_assert(sizeof(u64) == 8);
 
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr double u0 = 1.225663753e-6;
-constexpr size_t N_Beacons = 4;
+constexpr size_t N_Beacons = 2;
 constexpr size_t N_Sync_Seq = 16;
 
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
@@ -29,12 +29,12 @@ struct Vector3d {
 };
 
 constexpr Vector2d Beacons_Pos[] = {
-	{+0.00, +0.06},
-	{+0.00, +0.04},
+	{+0.2, -0.06},
+	// {+0.00, +0.04},
 	// {+0.00, +0.02},
 	// {+0.00, -0.02},
-	{+0.00, -0.04},
-	{+0.00, -0.06},
+	// {+0.00, -0.04},
+	{+0.2, +0.06},
 };
 
 constexpr Vector3d Viridis_Color_Map[] = {
