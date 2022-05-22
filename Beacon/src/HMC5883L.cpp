@@ -64,6 +64,16 @@ Vector HMC5883L::readRaw(void)
     return v;
 }
 
+Vectori16 HMC5883L::readRawi16(void)
+{
+    Vectori16 vi16;
+    vi16.XAxis = readRegister16(HMC5883L_REG_OUT_X_M) - xOffset;
+    vi16.YAxis = readRegister16(HMC5883L_REG_OUT_Y_M) - yOffset;
+    vi16.ZAxis = readRegister16(HMC5883L_REG_OUT_Z_M);
+
+    return vi16;
+}
+
 Vector HMC5883L::readNormalize(void)
 {
     v.XAxis = ((float)readRegister16(HMC5883L_REG_OUT_X_M) - xOffset) * mgPerDigit;

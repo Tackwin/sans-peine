@@ -209,10 +209,11 @@ void render(State& state, GUI_State& gui_state) noexcept {
 void render_plot(const std::vector<Reading>& readings) noexcept {
 	static std::vector<std::vector<float>> lines;
 	static std::vector<const float*> ys;
-	static size_t N_Samples = 10000;
+	static size_t N_Samples = 1000;
+	constexpr size_t N_Comp = 2;
 
-	static std::array<char*, N_Beacons> names = { nullptr };
-	for (size_t i = 0; i < N_Beacons; ++i) {
+	static std::array<char*, N_Beacons * N_Comp> names = { nullptr };
+	for (size_t i = 0; i < N_Beacons * N_Comp; ++i) {
 		free(names[i]);
 		names[i] = (char*)malloc(sizeof("Beacons XXXXXXX"));
 		sprintf(names[i], "Beacon %d", (int)i);
@@ -221,10 +222,10 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	lines.clear();
 	ys.clear();
 
-	lines.resize(N_Beacons);
+	lines.resize(N_Beacons * N_Comp);
 
-	float maxs[N_Beacons];
-	float mins[N_Beacons];
+	float maxs[N_Beacons * N_Comp];
+	float mins[N_Beacons * N_Comp];
 	for (auto& x : maxs) x = -FLT_MAX;
 	for (auto& x : mins) x = +FLT_MAX;
 	size_t n = readings.size();
@@ -232,30 +233,37 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	for (size_t j = 0; j < N_Beacons; ++j) {
 		for (size_t i = (n > N_Samples) ? (n - N_Samples) : 0; i < n; ++i) {
 			auto& a = readings[i].beacons[j];
-			lines[j].push_back(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z));
+			lines[j * N_Comp + 0].push_back(a.x);
+			lines[j * N_Comp + 1].push_back(a.y);
+			// lines[j * 3 + 2].push_back(a.z);
+
 			maxs[j] = (float)(lines[j].back() > maxs[j] ? lines[j].back() : maxs[j]);
 			mins[j] = (float)(lines[j].back() < mins[j] ? lines[j].back() : mins[j]);
 		}
 	}
+	for (size_t i = 0; i < lines.size(); ++i) for (auto& y : lines[i]) {
+		maxs[i] = (float)(y > maxs[i] ? y : maxs[i]);
+		mins[i] = (float)(y < mins[i] ? y : mins[i]);
+	}
 
-	for (size_t i = 0; i < N_Beacons; ++i) ys.push_back(lines[i].data());
+	for (size_t i = 0; i < lines.size(); ++i) ys.push_back(lines[i].data());
 
 	ImGui::PlotConfig conf;
 	conf.values.ys_list = ys.data();
-	conf.values.ys_count = N_Beacons;
+	conf.values.ys_count = ys.size();
 	conf.values.count = (int)std::min(readings.size(), N_Samples);
 
 	conf.scale.min = 0;
 	conf.scale.max = 0;
 	for (auto& x : mins) conf.scale.min = std::min(conf.scale.min, x);
 	for (auto& x : maxs) conf.scale.max = std::max(conf.scale.max, x);
-	conf.scale.min *= 1.1f;
+	conf.scale.min *= 0.9f;
 	conf.scale.max *= 1.1f;
 
 	conf.tooltip.show = true;
 
 	conf.grid_y.show = true;
-	conf.grid_y.size = conf.scale.max / 5;
+	conf.grid_y.size = std::max(0.f, conf.scale.max) / 5 + 1e-5;
 	conf.grid_y.subticks = 5;
 
 	conf.line_thickness = 2.f;
@@ -268,14 +276,111 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	ImGui::Plot("Readings", conf);
 
 	for (size_t i = 0; i < N_Beacons; ++i) {
-		conf.values.ys_list = ys.data() + i;
-		conf.values.ys_count = 1;
-		conf.scale.min = 1.1f * std::min(mins[i], 0.f);
-		conf.scale.max = 1.1f * std::max(maxs[i], 0.f);
+		conf.values.ys_list = ys.data() + i * N_Comp;
+		conf.values.ys_count = N_Comp;
+		// conf.scale.min = 0.9f * std::min(mins[i], 0.f);
+		// conf.scale.max = 1.1f * std::max(maxs[i], 0.f);
 
-		conf.grid_y.size = conf.scale.max / 5;
+		// conf.grid_y.size = (conf.scale.max - conf.scale.min + 1e-5) / 5;
 
 		ImGui::Plot(names[i], conf);
+	}
+
+	ImU32 colors[3] = {
+		IM_COL32(255, 0, 0, 255), IM_COL32(0, 255, 0, 255), IM_COL32(0, 0, 255, 255)
+	};
+	
+	{
+		ys.resize(2);
+		lines.resize(2);
+		for (auto& l : lines) l.clear();
+
+		conf.scale.max = -FLT_MAX;
+		conf.scale.min = +FLT_MAX;
+
+		constexpr float alphag = 0.9;
+		Vector3d g = { 0 };
+		for (size_t j = (n > N_Samples) ? (n - N_Samples) : 0; j < n; ++j) {
+			Vector3d acc = { 0 };
+			for (size_t i = 0; i < N_Imus; ++i) acc += readings[j].accel[i];
+			acc /= 2;
+
+			g.x = alphag * g.x + (1 - alphag) * acc.x;
+			g.y = alphag * g.y + (1 - alphag) * acc.y;
+			g.z = alphag * g.z + (1 - alphag) * acc.z;
+
+			float a = 0;
+			a += (acc.x - g.x) * (acc.x - g.x);
+			a += (acc.y - g.y) * (acc.y - g.y);
+			a += (acc.z - g.z) * (acc.z - g.z);
+			a = std::sqrtf(a);
+
+			float G = g.x * g.x + g.y * g.y + g.z * g.z;
+			G = std::sqrtf(G);
+
+			conf.scale.max = std::max(conf.scale.max, a);
+			conf.scale.max = std::max(conf.scale.max, G);
+			conf.scale.min = std::min(conf.scale.min, a);
+			conf.scale.min = std::min(conf.scale.min, G);
+
+			lines[0].push_back(a);
+			lines[1].push_back(G);
+		}
+
+		conf.scale.min *= 0.9f;
+		conf.scale.max *= 1.1f;
+
+		conf.grid_y.size = std::max(1e-5f, conf.scale.max - conf.scale.min) / 5;
+
+		ys[0] = lines[0].data();
+		ys[1] = lines[1].data();
+		conf.values.ys_list = ys.data();
+		conf.values.ys_count = ys.size();
+
+		conf.values.colors = colors;
+
+		ImGui::Plot("Acceleration", conf);
+	}
+{
+		ys.resize(3);
+		lines.resize(3);
+		for (auto& l : lines) l.clear();
+
+		conf.scale.max = -FLT_MAX;
+		conf.scale.min = +FLT_MAX;
+
+		for (size_t j = (n > N_Samples) ? (n - N_Samples) : 0; j < n; ++j) {
+			Vector3d gyr = { 0 };
+			for (size_t i = 0; i < N_Imus; ++i) gyr += readings[j].gyro[i];
+			gyr /= 2;
+
+			conf.scale.max = std::max(conf.scale.max, (float)gyr.x);
+			conf.scale.max = std::max(conf.scale.max, (float)gyr.y);
+			conf.scale.max = std::max(conf.scale.max, (float)gyr.z);
+
+			conf.scale.min = std::min(conf.scale.min, (float)gyr.x);
+			conf.scale.min = std::min(conf.scale.min, (float)gyr.y);
+			conf.scale.min = std::min(conf.scale.min, (float)gyr.z);
+
+			lines[0].push_back(gyr.x);
+			lines[1].push_back(gyr.y);
+			lines[2].push_back(gyr.z);
+		}
+
+		conf.scale.min *= 0.9f;
+		conf.scale.max *= 1.1f;
+
+		conf.grid_y.size = std::max(1e-5f, conf.scale.max - conf.scale.min) / 5;
+
+		ys[0] = lines[0].data();
+		ys[1] = lines[1].data();
+		ys[2] = lines[2].data();
+		conf.values.ys_list = ys.data();
+		conf.values.ys_count = ys.size();
+
+		conf.values.colors = colors;
+
+		ImGui::Plot("Gyroscope", conf);
 	}
 
 	ImGui::SliderSize("#Samples", &N_Samples, 10, 1000);

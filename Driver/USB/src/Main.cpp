@@ -168,6 +168,16 @@ struct Inputs_MAG3110 {
 	float y;
 	float z;
 	std::uint8_t id;
+	std::uint8_t type;
+};
+
+struct Inputs_GY521 {
+	std::uint8_t sync[N_Sync_Seq];
+	float x;
+	float y;
+	float z;
+	std::uint8_t id;
+	std::uint8_t type;
 };
 
 struct Opts {
@@ -276,7 +286,12 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
 	buffer.resize(32 * sizeof(Inputs_MAG3110));
+	auto dbuffer = buffer.data();
 
+	Reading r;
+	bool mag_reading_ready[N_Beacons] = { false };
+	bool acc_reading_ready[N_Imus] = { false };
+	bool gyr_reading_ready[N_Imus] = { false };
 	while (!state->request_stop) {
 		state->port.wait_read(buffer);
 
@@ -285,8 +300,6 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 		for (; offset + Reading_Byte_Size < buffer.size(); ++offset)
 			if (memcmp(buffer.data() + offset, Sync_Seq, N_Sync_Seq) == 0) break;
 
-		bool reading_ready[N_Beacons] = { false };
-		Reading r;
 		r.pressed = true;
 
 		for (size_t i = offset; i + S < buffer.size(); i += S) {
@@ -297,14 +310,37 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 			double tx = mmag_to_tesla(in.x);
 			double ty = mmag_to_tesla(in.y);
 			double tz = mmag_to_tesla(in.z);
-			double t = std::hypot(tx, ty, tz);
 
-			reading_ready[in.id] = true;
-			r.beacons[in.id].x = tx;
-			r.beacons[in.id].y = ty;
-			r.beacons[in.id].z = tz;
+			if (in.type == TYPE_MAGNETOMETER) {
+				mag_reading_ready[in.id] = true;
+				r.beacons[in.id].x = tx;
+				r.beacons[in.id].y = ty;
+				r.beacons[in.id].z = tz;
+			}
+			if (in.type == TYPE_ACCELEROMETER) {
+				acc_reading_ready[in.id] = true;
+				r.accel[in.id].x = in.x;
+				r.accel[in.id].y = in.y;
+				r.accel[in.id].z = in.z;
+				if (in.id % 2) {
+					r.accel[in.id].y *= -1;
+					r.accel[in.id].z *= -1;
+				}
+			}
+			if (in.type == TYPE_GYROSCOPE) {
+				gyr_reading_ready[in.id] = true;
+				r.gyro[in.id].x = in.x;
+				r.gyro[in.id].y = in.y;
+				r.gyro[in.id].z = in.z;
+				if (in.id % 2) {
+					r.gyro[in.id].x *= -1;
+					r.gyro[in.id].z *= -1;
+				}
+			}
 
-			if (memchr(reading_ready, 0, N_Beacons) != NULL) continue;
+			if (memchr(mag_reading_ready, 0, N_Beacons) != NULL) continue;
+			if (memchr(gyr_reading_ready, 0, N_Imus) != NULL) continue;
+			if (memchr(acc_reading_ready, 0, N_Imus) != NULL) continue;
 			r.timestamp = seconds();
 
 			while (!std::atomic_compare_exchange_strong(&state->critical_section, &False, true));
@@ -317,7 +353,9 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 
 			if ((state->final % size) <= (state->first % size)) state->first = state->final + 1;
 
-			memset(reading_ready, 0, N_Beacons);
+			memset(mag_reading_ready, 0, N_Beacons);
+			memset(acc_reading_ready, 0, N_Imus);
+			memset(gyr_reading_ready, 0, N_Imus);
 		}
 	}
 	state->is_stop = true;

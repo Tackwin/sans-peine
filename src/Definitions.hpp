@@ -19,6 +19,8 @@ static Vector3d& operator/=(Vector3d& a, double n) noexcept {
 #pragma pack(push, 1)
 struct Reading {
 	Vector3d beacons[N_Beacons] = { 0 };
+	Vector3d accel[N_Imus] = { 0 };
+	Vector3d gyro[N_Imus] = { 0 };
 	bool pressed;
 	double timestamp = 0;
 };

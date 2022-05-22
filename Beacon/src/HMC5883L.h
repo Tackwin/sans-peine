@@ -88,6 +88,12 @@ struct Vector
     float YAxis;
     float ZAxis;
 };
+struct Vectori16
+{
+    int16_t XAxis = 0;
+    int16_t YAxis = 0;
+    int16_t ZAxis = 0;
+};
 #endif
 
 class HMC5883L
@@ -97,6 +103,7 @@ class HMC5883L
 	bool begin(void);
 
 	Vector readRaw(void);
+	Vectori16 readRawi16(void);
 	Vector readNormalize(void);
 
 	void  setOffset(int xo, int yo);
@@ -112,8 +119,6 @@ class HMC5883L
 
 	void  setSamples(hmc5883l_samples_t samples);
 	hmc5883l_samples_t getSamples(void);
-
-    private:
 
 	float mgPerDigit;
 	Vector v;

@@ -339,6 +339,8 @@ void update_probability_texture(State& state) noexcept {
 		if (log_min > it) log_min = it;
 	}
 
+	frame_debug_values.watch("max", log_max);
+	frame_debug_values.watch("min", log_min);
 
 	for (size_t x = 0; x < w; ++x)
 	for (size_t y = 0; y < h; ++y) {
@@ -348,7 +350,7 @@ void update_probability_texture(State& state) noexcept {
 		auto t = (it - log_min) / (log_max - log_min);
 		auto c = cmap(t);
 
-		memcpy(pixels.data() + ((x + (h - y - 1) * w) * 4 + 0), &c, 4);
+		memcpy(pixels.data() + ((x + y * w) * 4 + 0), &c, 4);
 	}
 
 	probability_image.create(w, h, pixels.data());
@@ -364,8 +366,8 @@ void render_estimation_trace(State& state) noexcept {
 		auto next = state.estimated_points[i + stride];
 
 		sf::Vertex l[] = {
-			sf::Vertex(sf::Vector2f{(float)curr.x, -(float)curr.y}),
-			sf::Vertex(sf::Vector2f{(float)next.x, -(float)next.y})
+			sf::Vertex(sf::Vector2f{(float)curr.x, (float)curr.y}),
+			sf::Vertex(sf::Vector2f{(float)next.x, (float)next.y})
 		};
 		state.renderTarget->draw(l, 2, sf::Lines);
 	}

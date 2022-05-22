@@ -206,11 +206,19 @@ void update(State& state) noexcept {
 				Reading avg = {};
 				size_t n_pressed = 0;
 				for (auto& x : avg_readings) {
-					for (size_t i = 0; i < N_Beacons; ++i) avg.beacons[i] += x.beacons[i];
+					for (size_t i = 0; i < N_Beacons; ++i) {
+						avg.beacons[i] += x.beacons[i];
+						avg.accel[i] += x.accel[i];
+						avg.gyro[i] += x.gyro[i];
+					}
 					n_pressed += (x.pressed ? 1 : 0);
 				}
 
-				for (size_t i = 0; i < N_Beacons; ++i) avg.beacons[i] /= avg_readings.size();
+				for (size_t i = 0; i < N_Beacons; ++i) {
+					avg.beacons[i] /= avg_readings.size();
+					avg.accel[i] /= avg_readings.size();
+					avg.gyro[i] /= avg_readings.size();
+				}
 				avg.pressed = n_pressed > avg_readings.size() / 2;
 
 				avg_readings.clear();
@@ -282,10 +290,19 @@ void update(State& state) noexcept {
 		sim_params.reading = new_reading;
 		sim_params.sensitivity = state.gui.sensitivity;
 
+		Input_State input_state;
+		input_state.reading = new_reading;
+		input_state.beacons = state.beacons;
+		input_state.magnet_strength = state.gui.magnet_strength;
+
 		auto start = seconds();
 		auto t1 = seconds();
-		auto sim_res = space_sim(sim_params);
-		compute_probability_grid(state, sim_res);
+
+		// auto sim_res = space_sim(sim_params);
+		// compute_probability_grid(state, sim_res);
+
+		auto input_sampling = sample_input_space(input_state);
+		compute_probability_grid(state, input_sampling);
 
 		auto w = state.probability_resolution;
 		auto h = state.probability_resolution;

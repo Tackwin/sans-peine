@@ -23,7 +23,7 @@ struct GUI_State {
 	sf::Color grid_color = sf::Color(10, 10, 10);
 
 
-	double magnet_strength = 3.15;
+	double magnet_strength = 10.0;
 	double magnet_height = 0.06;
 
 	size_t oversampling = 1;

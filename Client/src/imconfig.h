@@ -28,3 +28,4 @@
     }
 
 #define ImTextureID unsigned int
+#define ImDrawIdx unsigned int

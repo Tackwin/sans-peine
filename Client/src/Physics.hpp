@@ -6,6 +6,7 @@
 #include "Definitions.hpp"
 #include "Constants.hpp"
 
+
 struct Simulation_Parameters {
 	size_t resolution = 1000;
 
@@ -16,7 +17,7 @@ struct Simulation_Parameters {
 
 	double h = 0.065;
 
-	double magnet_strength = 4.875;
+	double magnet_strength = 10.f;
 
 	size_t distance_resolution = 1000;
 	double distance_step = 0.001;
@@ -32,7 +33,6 @@ struct Simulation_Parameters {
 	double sensitivity = 0.1;
 };
 
-
 struct Simulation_Result {
 	Simulation_Parameters input_parameters;
 
@@ -42,7 +42,23 @@ struct Simulation_Result {
 	std::vector<double> angle_fields;
 };
 
+struct Input_State {
+	double magnet_strength = 4.875;
+	std::array<Beacon, N_Beacons> beacons;
+	Reading reading;
+};
+
+struct Input_Sampling {
+	static constexpr size_t N = 100000;
+
+	Input_State input_state;
+	std::array<Vector3d, N_Beacons> (*samplef)(const Input_State&, uint32_t*) = nullptr;
+};
+
 struct State;
 extern Simulation_Result _space_sim(Simulation_Parameters& state) noexcept;
 extern Simulation_Result space_sim(Simulation_Parameters& state) noexcept;
 extern void compute_probability_grid(State& state, const Simulation_Result& result) noexcept;
+
+extern Input_Sampling sample_input_space(const Input_State& state) noexcept;
+extern void compute_probability_grid(State& state, const Input_Sampling& samplings) noexcept;

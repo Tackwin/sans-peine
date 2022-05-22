@@ -2,6 +2,7 @@
 #include <cmath>
 #include "Renderer.hpp"
 #include <cmath>
+#include <omp.h>
 
 #include "Macro.hpp"
 
@@ -158,6 +159,7 @@ extern Simulation_Result _space_sim(Simulation_Parameters& state) noexcept {
 	return result;
 }
 
+
 Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 	// >SPEED(Tackwin): result allocate the space for the result itself but it's stupid we
 	// could pass the space as a parameter to save allocation since we likely want to reuse the
@@ -204,7 +206,7 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 		auto n = b.calibration_sample;
 
 		auto s = std::sqrt((b.sum2_dist / n - (b.sum_dist / n) * (b.sum_dist / n)) * (n / (n - 1.0)));
-		s *= 100;
+		s *= 10;
 		auto u = b.sum_dist / n;
 
 		u = std::hypot(read.beacons[b_idx].x, read.beacons[b_idx].y, read.beacons[b_idx].z) - u;
@@ -266,8 +268,8 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 		auto ux = read.beacons[b_idx].x - b.mean.x;
 		auto uy = read.beacons[b_idx].y - b.mean.y;
 
-		auto sx = b.std.x * 100 + std::abs(ux) * state.sensitivity;
-		auto sy = b.std.y * 100 + std::abs(uy) * state.sensitivity;
+		auto sx = b.std.x * 10 + std::abs(ux) * state.sensitivity;
+		auto sy = b.std.y * 10 + std::abs(uy) * state.sensitivity;
 
 		auto sx2 = sx*sx;
 		auto sy2 = sy*sy;
@@ -430,7 +432,7 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 
 			local_p *= u * (1 - t) + v * t;
 
-			double a = PI/2 - fast_atan2(y, x);
+			double a = fast_atan2(y, x);
 			if (a < 0) a += 2 * PI;
 
 			t_low  = (int64_t)(a * angle_freq);
@@ -443,5 +445,123 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 		}
 
 		state.probability_grid[xi + yi * w] *= local_p;
+	}
+}
+
+
+Input_Sampling sample_input_space(const Input_State& input_state) noexcept {
+	Input_Sampling result;
+
+	result.input_state = input_state;
+	result.samplef = [] (const Input_State& input_state, uint32_t* seed) {
+		std::array<Vector3d, N_Beacons> result;
+		for (size_t i = 0; i < N_Beacons; ++i) {
+			auto& r = input_state.reading.beacons[i];
+			auto& b = input_state.beacons[i];
+			Vector3d mag;
+
+			mag.x = (r.x - b.mean.x) + b.std.x * 100 * fast_normal(seed);
+			mag.y = (r.y - b.mean.y) + b.std.y * 100 * fast_normal(seed);
+			mag.z = (r.z - b.mean.z) + b.std.z * 100 * fast_normal(seed);
+
+			result[i] = mag;
+		}
+		return result;
+	};
+
+	return result;
+}
+
+void compute_probability_grid(State& state, const Input_Sampling& samplings) noexcept {
+	auto w = state.probability_resolution;
+	auto h = state.probability_resolution;
+	auto ww = state.probability_space_size / (w - 1.0);
+	auto hh = state.probability_space_size / (h - 1.0);
+	auto bias = -state.probability_space_size / 2.0;
+
+	auto m_strength = samplings.input_state.magnet_strength;
+
+	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 0;
+
+	auto solve_xy = [] (Vector3d m, Vector3d b) -> std::array<Vector2d, 4> {
+		thread_local uint32_t seed[1] = { 2 };
+		constexpr double u0 = 1.225663753e-6;
+		constexpr double PI = 3.141592653589793238462643383279502884;
+
+		auto c = (3 * u0) / (4 * PI);
+
+		auto mx = m.x;
+		auto my = m.y;
+		auto mz = m.z;
+
+		auto bx = b.x;
+		auto by = b.y;
+		auto bz = b.z;
+
+		auto bx2 = bx * bx;
+		auto by2 = by * by;
+		auto bz2 = bz * bz;
+
+		auto mx2 = mx * mx;
+		auto my2 = my * my;
+		auto mz2 = mz * mz;
+
+		auto s7 = bx2 + by2 + bz2;
+		auto s6 = mz * bx2 - bz * mx * bx + mz * by2 - bz * my * by;
+		s6 *= s6;
+		auto s5 = pow(abs(-c * (bx * mx + by * my + bz * mz) / s7), 2.0/3.0);
+		auto s4 = bx2 * (my2 + mz2) - 2 * bx * mx * (by * my + bz * mz);
+		s4     += by2 * (mx2 + mz2) - 2 * by * bz * my * mz + bz2 * (mx2 + my2);
+
+		auto x = (mx * by2 - bx * my * by + mx * bz2 - bx * mz * bz) * std::sqrt(s7 * s6 * s5 * s4);
+		x /= s7 * s4 * (mz * bx2 - bz * mx * bx + mz * by2 - bz * my * by);
+
+		auto y = (my * bx2 - by * mx * bx + my * bz2 - by * mz * bz) * std::sqrt(s5 * s7 * s6 * s4);
+		y /= s7 * s4 * (mz * bx2 - bz * mx * bx + mz * by2 - bz * my * by);
+
+
+		// auto l = std::hypot(b.x, b.y, b.z);
+		// l = m.z * 1e-6 / l;
+		// l = std::pow(l, 1.0/3.0);
+		// auto p = fast_uniform(seed) * 2 * 3.1415926;
+		// auto x = std::cos(p) * l;
+		// auto y = std::sin(p) * l;
+
+		return std::array<Vector2d, 4>{
+			Vector2d{ +x, +y },
+			Vector2d{ +x, +y },
+			Vector2d{ +x, +y },
+			Vector2d{ +x, +y }
+		};
+	};
+
+	uint32_t seeds[32];
+	for (size_t i = 0; i < 32; ++i) seeds[i] = (int32_t)(i + 1);
+
+	#pragma omp parallel for
+	for (size_t n = 0; n < samplings.N; ++n) {
+		uint32_t* seed = seeds + omp_get_thread_num();
+		std::array<Vector3d, N_Beacons> sample = samplings.samplef(samplings.input_state, seed);
+		for (size_t i = 0; i < N_Beacons; ++i) {
+			auto b = sample[i];
+			auto m = Vector3d{0.0, 0.0, m_strength};
+
+			auto ps = solve_xy(m, b);
+
+			for (auto& p : ps) {
+				p.x += state.beacons[i].pos.x;
+				p.y += state.beacons[i].pos.y;
+
+				int xi = (p.x - bias) / ww;
+				int yi = (p.y - bias) / ww;
+
+				if (
+					0 <= xi && xi < state.probability_resolution &&
+					0 <= yi && yi < state.probability_resolution
+				) {
+					state.probability_grid[xi + yi * w] += 1;
+				}
+			}
+		}
 	}
 }

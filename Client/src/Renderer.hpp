@@ -37,6 +37,8 @@ struct State {
 	std::vector<Reading> readings;
 	std::vector<Reading> new_readings;
 
+	
+
 	float zoom_level = 1.f;
 	sf::Vector2f camera_pos = {};
 
@@ -49,8 +51,8 @@ struct State {
 	sf::Texture probability_texture;
 	double* probability_grid = nullptr;
 	double probability_space_size = 0.5;
-	size_t probability_resolution = 256;
-	size_t display_probability_resolution = 128;
+	size_t probability_resolution = 512;
+	size_t display_probability_resolution = 512;
 
 	std::vector<Vector2d> estimated_points;
 
@@ -64,4 +66,5 @@ struct State {
 
 extern void render_triangulation(State& state) noexcept;
 extern void render_estimation_trace(State& state) noexcept;
-extern void update_probability_texture(State& state) noexcept;
+extern void 
+update_probability_texture(State& state) noexcept;

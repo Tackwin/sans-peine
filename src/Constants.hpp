@@ -6,9 +6,14 @@ using u64 = long long unsigned int;
 static_assert(sizeof(u32) == 4);
 static_assert(sizeof(u64) == 8);
 
+constexpr size_t TYPE_MAGNETOMETER  = 0;
+constexpr size_t TYPE_ACCELEROMETER = 1;
+constexpr size_t TYPE_GYROSCOPE     = 2;
+
 constexpr double PI = 3.141592653589793238462643383279502884;
 constexpr double u0 = 1.225663753e-6;
-constexpr size_t N_Beacons = 2;
+constexpr size_t N_Beacons = 4;
+constexpr size_t N_Imus = 2;
 constexpr size_t N_Sync_Seq = 16;
 
 constexpr const char* Mail_Name = "\\\\.\\Mailslot\\SP";
@@ -29,12 +34,10 @@ struct Vector3d {
 };
 
 constexpr Vector2d Beacons_Pos[] = {
-	{+0.2, -0.06},
-	// {+0.00, +0.04},
-	// {+0.00, +0.02},
-	// {+0.00, -0.02},
-	// {+0.00, -0.04},
-	{+0.2, +0.06},
+	{-0.01+0.2, -0.04},
+	{+0.01+0.2, -0.04},
+	{+0.01+0.2, +0.04},
+	{-0.01+0.2, +0.06}
 };
 
 constexpr Vector3d Viridis_Color_Map[] = {
