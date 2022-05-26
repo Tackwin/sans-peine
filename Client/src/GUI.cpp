@@ -124,6 +124,9 @@ void render(State& state, GUI_State& gui_state) noexcept {
 	}
 	ImGui::PopID();
 
+	ImGui::Checkbox("Compute mag", &gui_state.compute_mag);
+	ImGui::Checkbox("Compute acc", &gui_state.compute_acc);
+
 	ImGui::PopID();
 
 	for (size_t i = 0; i < N_Beacons; ++i) for (size_t j = 0; j <= i; j++) {

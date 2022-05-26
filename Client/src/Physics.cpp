@@ -454,7 +454,7 @@ Input_Sampling sample_input_space(const Input_State& input_state) noexcept {
 
 	result.input_state = input_state;
 	result.samplef = [] (const Input_State& input_state, uint32_t* seed) {
-		std::array<Vector3d, N_Beacons> result;
+		Input_Sampling::Sample sample;
 		for (size_t i = 0; i < N_Beacons; ++i) {
 			auto& r = input_state.reading.beacons[i];
 			auto& b = input_state.beacons[i];
@@ -464,9 +464,20 @@ Input_Sampling sample_input_space(const Input_State& input_state) noexcept {
 			mag.y = (r.y - b.mean.y) + b.std.y * 100 * fast_normal(seed);
 			mag.z = (r.z - b.mean.z) + b.std.z * 100 * fast_normal(seed);
 
-			result[i] = mag;
+			sample.mag[i] = mag;
 		}
-		return result;
+
+		const Pen& pen = input_state.pen;
+		sample.acc = { 0 };
+		for (size_t i = 0; i < N_Imus; ++i) {
+			auto& a = input_state.reading.accel[i];
+			sample.acc.x += (a.x - input_state.current_g.x) + pen.acc_std[i].x * fast_normal(seed);
+			sample.acc.y += (a.y - input_state.current_g.y) + pen.acc_std[i].y * fast_normal(seed);
+			sample.acc.z += (a.z - input_state.current_g.z) + pen.acc_std[i].z * fast_normal(seed);
+		}
+		sample.acc /= N_Imus;
+
+		return sample;
 	};
 
 	return result;
@@ -540,10 +551,11 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 
 	#pragma omp parallel for
 	for (size_t n = 0; n < samplings.N; ++n) {
-		uint32_t* seed = seeds + omp_get_thread_num();
-		std::array<Vector3d, N_Beacons> sample = samplings.samplef(samplings.input_state, seed);
-		for (size_t i = 0; i < N_Beacons; ++i) {
-			auto b = sample[i];
+		uint32_t* seed = seeds + 1; // omp_get_thread_num();
+		Input_Sampling::Sample sample = samplings.samplef(samplings.input_state, seed);
+
+		if (state.gui.compute_mag) for (size_t i = 0; i < N_Beacons; ++i) {
+			auto b = sample.mag[i];
 			auto m = Vector3d{0.0, 0.0, m_strength};
 
 			auto ps = solve_xy(m, b);
@@ -563,5 +575,26 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 				}
 			}
 		}
+
+		if (state.gui.compute_acc) {
+			Vector3d v = samplings.input_state.pen.velocity;
+			v.x += sample.acc.x * samplings.input_state.dt;
+			v.y += sample.acc.y * samplings.input_state.dt;
+			v.z += sample.acc.z * samplings.input_state.dt;
+
+			double V = std::hypot(v.x, v.y, v.z);
+
+			double a = 2 * 3.1415926 * n / samplings.N;
+			int xi = (V * std::cos(a) - bias) / ww;
+			int yi = (V * std::sin(a) - bias) / ww;
+
+			if (
+				0 <= xi && xi < state.probability_resolution &&
+				0 <= yi && yi < state.probability_resolution
+			) {
+				state.probability_grid[xi + yi * w] += 1;
+			}
+		}
 	}
+
 }

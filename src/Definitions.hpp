@@ -37,6 +37,19 @@ struct Beacon {
 	Vector3d mean;
 	Vector3d std;
 };
+
+struct Pen {
+	Vector3d acc_std[N_Imus];
+	Vector3d acc_sum[N_Imus];
+	Vector3d acc_sum2[N_Imus];
+	
+	size_t calibration_sample = 0;
+
+	Vector3d current_g = { 0 };
+
+	Vector3d velocity = { 0 };
+};
+
 #pragma pack(pop)
 
 #include <chrono>

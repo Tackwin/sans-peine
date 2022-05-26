@@ -168,67 +168,96 @@ void update(State& state) noexcept {
 		}
 	}
 
+	auto handle_reading_calibration = [&] (Reading res) {
+		for (size_t i = 0; i < N_Beacons; ++i) {
+			auto& b = state.beacons[i];
 
-	auto handle_reading = [&] (Reading res) {
-		if (state.gui.calibrating) {
-			for (size_t i = 0; i < N_Beacons; ++i) {
-				auto& b = state.beacons[i];
+			b.calibration_sample++;
+			b.sum_sample += res.beacons[i];
+			b.sum_dist += std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
+			b.sum2_sample.x += res.beacons[i].x * res.beacons[i].x;
+			b.sum2_sample.y += res.beacons[i].y * res.beacons[i].y;
+			b.sum2_sample.z += res.beacons[i].z * res.beacons[i].z;
 
-				b.calibration_sample++;
-				b.sum_sample += res.beacons[i];
-				b.sum_dist += std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
-				b.sum2_sample.x += res.beacons[i].x * res.beacons[i].x;
-				b.sum2_sample.y += res.beacons[i].y * res.beacons[i].y;
-				b.sum2_sample.z += res.beacons[i].z * res.beacons[i].z;
+			b.sum2_dist +=
+				std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z) *
+				std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
 
-				b.sum2_dist +=
-					std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z) *
-					std::hypot(res.beacons[i].x, res.beacons[i].y, res.beacons[i].z);
+			b.mean.x = b.sum_sample.x / b.calibration_sample;
+			b.mean.y = b.sum_sample.y / b.calibration_sample;
+			b.mean.z = b.sum_sample.z / b.calibration_sample;
 
-				b.mean.x = b.sum_sample.x / b.calibration_sample;
-				b.mean.y = b.sum_sample.y / b.calibration_sample;
-				b.mean.z = b.sum_sample.z / b.calibration_sample;
+			auto n = b.calibration_sample;
+			b.std.x = b.sum2_sample.x / n - (b.sum_sample.x * b.sum_sample.x) / (n * n);
+			b.std.y = b.sum2_sample.y / n - (b.sum_sample.y * b.sum_sample.y) / (n * n);
+			b.std.z = b.sum2_sample.z / n - (b.sum_sample.z * b.sum_sample.z) / (n * n);
 
-				auto n = b.calibration_sample;
-				b.std.x = b.sum2_sample.x / n - (b.sum_sample.x * b.sum_sample.x) / (n * n);
-				b.std.y = b.sum2_sample.y / n - (b.sum_sample.y * b.sum_sample.y) / (n * n);
-				b.std.z = b.sum2_sample.z / n - (b.sum_sample.z * b.sum_sample.z) / (n * n);
+			auto f = n / (n - 1.0);
+			b.std.x = std::sqrt(b.std.x * f);
+			b.std.y = std::sqrt(b.std.y * f);
+			b.std.z = std::sqrt(b.std.z * f);
+		}
+		for (size_t i = 0; i < N_Imus; ++i) {
+			Pen& p = state.pen;
 
-				auto f = n / (n - 1.0);
-				b.std.x = std::sqrt(b.std.x * f);
-				b.std.y = std::sqrt(b.std.y * f);
-				b.std.z = std::sqrt(b.std.z * f);
-			}
-			state.curr_sps_counter += 1;
-		} else {
-			avg_readings.push_back(res);
-			if (avg_readings.size() >= state.gui.oversampling) {
-				Reading avg = {};
-				size_t n_pressed = 0;
-				for (auto& x : avg_readings) {
-					for (size_t i = 0; i < N_Beacons; ++i) {
-						avg.beacons[i] += x.beacons[i];
-						avg.accel[i] += x.accel[i];
-						avg.gyro[i] += x.gyro[i];
-					}
-					n_pressed += (x.pressed ? 1 : 0);
-				}
+			p.calibration_sample++;
+			p.acc_sum[i].x += res.accel[i].x;
+			p.acc_sum[i].y += res.accel[i].y;
+			p.acc_sum[i].z += res.accel[i].z;
+			p.acc_sum2[i].x += res.accel[i].x * res.accel[i].x;
+			p.acc_sum2[i].y += res.accel[i].y * res.accel[i].y;
+			p.acc_sum2[i].z += res.accel[i].z * res.accel[i].z;
+			
+			size_t n = p.calibration_sample;
+			p.acc_std[i].x = p.acc_sum2[i].x / n - (p.acc_sum[i].x * p.acc_sum[i].x) / (n * n);
+			p.acc_std[i].y = p.acc_sum2[i].y / n - (p.acc_sum[i].y * p.acc_sum[i].y) / (n * n);
+			p.acc_std[i].z = p.acc_sum2[i].z / n - (p.acc_sum[i].z * p.acc_sum[i].z) / (n * n);
 
+			auto f = n / (n - 1.0);
+			p.acc_std[i].x = std::sqrt(p.acc_std[i].x * f);
+			p.acc_std[i].y = std::sqrt(p.acc_std[i].y * f);
+			p.acc_std[i].z = std::sqrt(p.acc_std[i].z * f);
+		}
+		state.curr_sps_counter += 1;
+	};
+	auto handle_reading_calibrated = [&] (Reading res) {
+		avg_readings.push_back(res);
+		if (avg_readings.size() >= state.gui.oversampling) {
+			Reading avg = {};
+			size_t n_pressed = 0;
+			for (auto& x : avg_readings) {
 				for (size_t i = 0; i < N_Beacons; ++i) {
-					avg.beacons[i] /= avg_readings.size();
-					avg.accel[i] /= avg_readings.size();
-					avg.gyro[i] /= avg_readings.size();
+					avg.beacons[i] += x.beacons[i];
 				}
-				avg.pressed = n_pressed > avg_readings.size() / 2;
-
-				avg_readings.clear();
-
-				state.new_readings.push_back(avg);
-
-				state.curr_sps_counter += 1;
+				for (size_t i = 0; i < N_Imus; ++i) {
+					avg.accel[i] += x.accel[i];
+					avg.gyro[i] += x.gyro[i];
+				}
+				n_pressed += (x.pressed ? 1 : 0);
 			}
+
+			for (size_t i = 0; i < N_Beacons; ++i) {
+				avg.beacons[i] /= avg_readings.size();
+			}
+			for (size_t i = 0; i < N_Imus; ++i) {
+				avg.accel[i] /= avg_readings.size();
+				avg.gyro[i] /= avg_readings.size();
+			}
+			avg.pressed = n_pressed > avg_readings.size() / 2;
+
+			avg_readings.clear();
+
+			state.new_readings.push_back(avg);
+
+			state.curr_sps_counter += 1;
 		}
 	};
+
+	auto handle_reading = [&] (Reading res) {
+		if (state.gui.calibrating) handle_reading_calibration(res);
+		else                       handle_reading_calibrated(res);
+	};
+
 	constexpr size_t Max_New_Per_Frame = 10;
 	size_t i_new_per_frame = 0;
 
@@ -293,6 +322,8 @@ void update(State& state) noexcept {
 		Input_State input_state;
 		input_state.reading = new_reading;
 		input_state.beacons = state.beacons;
+		input_state.pen     = state.pen;
+		input_state.current_g = state.pen.current_g;
 		input_state.magnet_strength = state.gui.magnet_strength;
 
 		auto start = seconds();
@@ -365,6 +396,27 @@ void update(State& state) noexcept {
 		avg2_trace();
 		auto elapsed = seconds() - start;
 		perf_values.add_to_distribution("All", elapsed);
+
+		Vector3d acc = { 0 };
+		for (auto& x : new_reading.accel) {
+			acc.x += x.x;
+			acc.y += x.y;
+			acc.z += x.z;
+		}
+		acc /= N_Imus;
+
+		state.pen.current_g.x = state.alphag * state.pen.current_g.x + (1 - state.alphag) * acc.x;
+		state.pen.current_g.y = state.alphag * state.pen.current_g.y + (1 - state.alphag) * acc.y;
+		state.pen.current_g.z = state.alphag * state.pen.current_g.z + (1 - state.alphag) * acc.z;
+
+		state.pen.velocity.x += (acc.x - state.pen.current_g.x) * 1 / 30.0;
+		state.pen.velocity.y += (acc.y - state.pen.current_g.y) * 1 / 30.0;
+		state.pen.velocity.z += (acc.z - state.pen.current_g.z) * 1 / 30.0;
+
+		state.pen.velocity.x *= state.velocity_falloff;
+		state.pen.velocity.y *= state.velocity_falloff;
+		state.pen.velocity.z *= state.velocity_falloff;
+
 		state.readings.push_back(new_reading);
 	}
 	state.new_readings.clear();

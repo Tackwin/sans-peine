@@ -24,6 +24,11 @@ constexpr size_t N_DETAILS = sizeof(DETAILS) / sizeof(DETAILS[0]);
 struct State {
 	size_t n_beacons_placed = 0;
 	std::array<Beacon, N_Beacons> beacons;
+
+	double velocity_falloff = 0.99;
+	double alphag = 0.9;
+	Pen pen;
+
 	bool right_clicked = false;
 
 	sf::ContextSettings context_settings;
@@ -36,8 +41,6 @@ struct State {
 
 	std::vector<Reading> readings;
 	std::vector<Reading> new_readings;
-
-	
 
 	float zoom_level = 1.f;
 	sf::Vector2f camera_pos = {};

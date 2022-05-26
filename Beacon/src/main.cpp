@@ -57,8 +57,8 @@ int last_vectors_idx[N_Beacons];
 Vectori16 last_vectors[N_Beacons * ROLLING];
 
 void setup() {
-	// Serial.begin(128000);
-	Serial.begin(115200);
+	Serial.begin(128000);
+	// Serial.begin(115200);
 	Wire.setWireTimeout(0);
 	Wire.begin();
 	bool res = multiplexer.begin();
@@ -174,7 +174,6 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 
 void loop() {
 	for (size_t i = 0; i < N_Beacons; ++i) if (beacon_healthy[i]) {
-		continue;
 		multiplexer.selectChannel(BEACON_BUS_MAP[i]);
 
 		auto read = beacons[i].readRawi16();
@@ -203,8 +202,8 @@ void loop() {
 		gyr.XAxis = imus[i].getGyroX();
 		gyr.YAxis = imus[i].getGyroY();
 		gyr.ZAxis = imus[i].getGyroZ();
-		// send_acc((uint8_t)i, acc.XAxis, acc.YAxis, acc.ZAxis);
-		// send_gyr((uint8_t)i, gyr.XAxis, gyr.YAxis, gyr.ZAxis);
-		serial_printf("X %d Y %d Z %d\n", (int)(1000000 * gyr.XAxis), (int)(1000000 * gyr.YAxis), (int)(1000000 * gyr.ZAxis));
+		send_acc((uint8_t)i, acc.XAxis, acc.YAxis, acc.ZAxis);
+		send_gyr((uint8_t)i, gyr.XAxis, gyr.YAxis, gyr.ZAxis);
+		// serial_printf("X %d Y %d Z %d\n", (int)(1000000 * gyr.XAxis), (int)(1000000 * gyr.YAxis), (int)(1000000 * gyr.ZAxis));
 	}
 }

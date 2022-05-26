@@ -32,6 +32,9 @@ struct GUI_State {
 
 	Simulation_Parameters space_sim;
 
+	bool compute_mag = true;
+	bool compute_acc = true;
+
 	bool display_x = true;
 	bool display_y = true;
 	bool display_z = true;

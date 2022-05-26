@@ -44,15 +44,26 @@ struct Simulation_Result {
 
 struct Input_State {
 	double magnet_strength = 4.875;
+	double dt = 1/30.0;
+	
 	std::array<Beacon, N_Beacons> beacons;
+	Pen pen;
+
 	Reading reading;
+
+	Vector3d current_g;
 };
 
 struct Input_Sampling {
-	static constexpr size_t N = 100000;
+	struct Sample {
+		std::array<Vector3d, N_Beacons> mag;
+		Vector3d acc;
+	};
+
+	static constexpr size_t N = 1000;
 
 	Input_State input_state;
-	std::array<Vector3d, N_Beacons> (*samplef)(const Input_State&, uint32_t*) = nullptr;
+	Sample (*samplef)(const Input_State&, uint32_t*) = nullptr;
 };
 
 struct State;
