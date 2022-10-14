@@ -30,7 +30,8 @@ struct Beacon {
 
 	Vector3d sum_sample = {};
 	Vector3d sum2_sample = {};
-	double sum_dist = 0;
+	double
+	 sum_dist = 0;
 	double sum2_dist = 0;
 
 	size_t calibration_sample = 0;

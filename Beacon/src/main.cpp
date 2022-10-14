@@ -3,12 +3,13 @@
 #include "HMC5883L.h"
 #include "TCA9548.h"
 #include "MLX90393.h"
+#include "RM3100.hpp"
 #include "GY521.h"
 
 #include <math.h>
 
-constexpr size_t N_Beacons = 4;
-constexpr size_t N_Imus = 2;
+constexpr size_t N_Beacons = 2;
+constexpr size_t N_Imus = 0;
 constexpr size_t N_Sync_Seq = 16;
 
 // HMC5883L
@@ -41,24 +42,38 @@ void use_bus(uint8_t bus) noexcept {
 	Wire.endTransmission();
 }
 
-HMC5883L beacons[N_Beacons];
+
+RM3100 beacons[N_Beacons];
 Adafruit_MLX90393 mlx_beacons[N_Beacons];
-bool beacon_healthy[N_Beacons] = { false };
+bool beacon_healthy[N_Beacons] = { };
 
 TCA9548 multiplexer(0x70);
-size_t BEACON_BUS_MAP[] = {0, 1, 7, 6, 6, 7, 6, 7};
+size_t BEACON_BUS_MAP[] = {2, 7, 7, 6, 6, 7, 6, 7};
 
 GY521 imus[N_Imus];
 size_t IMU_BUS_MAP[] = {2, 3, 3, 3, 3, 3, 3, 3};
-bool imu_healthy[N_Imus] = { false };
+bool imu_healthy[N_Imus] = { };
 
 constexpr size_t ROLLING = 1;
 int last_vectors_idx[N_Beacons];
 Vectori16 last_vectors[N_Beacons * ROLLING];
 
+void select(uint8_t port) noexcept {
+	multiplexer.selectChannel(port);
+	// for (size_t i = 0; i < N_Beacons; i += 1) {
+	// 	digitalWrite(BEACON_BUS_MAP[i], BEACON_BUS_MAP[i] != port);
+	// }
+	// delay(1);
+}
+void unselect() noexcept{
+	// for (size_t i = 0; i < N_Beacons; i += 1) digitalWrite(BEACON_BUS_MAP[i], HIGH);
+	// delay(1);
+}
+
 void setup() {
+	SPI.begin(); // Initiate the SPI library
+	SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));  
 	Serial.begin(128000);
-	// Serial.begin(115200);
 	Wire.setWireTimeout(0);
 	Wire.begin();
 	bool res = multiplexer.begin();
@@ -66,6 +81,8 @@ void setup() {
 		serial_printf("Multiplexer error\n");
 		// return;
 	}
+
+	for (size_t i = 0; i < N_Beacons; i += 1) pinMode(BEACON_BUS_MAP[i], OUTPUT);
 	// for (size_t i = 0; i < N_Beacons; ++i) {
 	// 	multiplexer.selectChannel(BEACON_BUS_MAP[i]);
 	// 	auto& b = mlx_beacons[i];
@@ -82,7 +99,7 @@ void setup() {
 	// 	beacon_healthy[i] = h;
 	// }
 	for (size_t i = 0; i < N_Imus; ++i) {
-		multiplexer.selectChannel(IMU_BUS_MAP[i]);
+		select(IMU_BUS_MAP[i]);
 		auto& b = imus[i];
 		b = GY521(0x68);
 		bool h = b.begin();
@@ -105,18 +122,28 @@ void setup() {
 
 
 	for (size_t i = 0; i < N_Beacons; ++i) {
-		multiplexer.selectChannel(BEACON_BUS_MAP[i]);
-		bool res = beacons[i].begin();
+		select(BEACON_BUS_MAP[i]);
+		uint8_t revid = 0;
+		bool res = beacons[i].revid(revid);
+		unselect();
+
+		// RM3100::self_test(BEACON_BUS_MAP[i]);
 		beacon_healthy[i] = res;
-		if (!res) {
+		if (!res || revid != 0x22) {
 			serial_printf("\nError init %d\n", (int)i);
 			continue;
 		}
 		
-		beacons[i].setSamples(HMC5883L_SAMPLES_1);
-		beacons[i].setRange(HMC5883L_RANGE_1_3GA);
-		beacons[i].setDataRate(HMC5883L_DATARATE_30HZ);
-		// beacons[i].setMeasurementMode(HMC5883L_SINGLE);
+		serial_printf("Revid of %d = %d\n", (int)i, (int)revid);
+		select(BEACON_BUS_MAP[i]);
+		beacons[i].set_cycle_count(200, 200, 200);
+		unselect();
+		select(BEACON_BUS_MAP[i]);
+		beacons[i].set_update_rate(HZ_37);
+		unselect();
+		select(BEACON_BUS_MAP[i]);
+		beacons[i].toggle_continuous_mode();
+		unselect();
 	}
 
 	for (auto& x : last_vectors_idx) x = 0;
@@ -127,18 +154,41 @@ void setup() {
 #define TYPE_GYROSCOPE 2
 
 struct __attribute__((packed)) Output {
-	uint8_t sync[N_Sync_Seq];
+	uint8_t sync_start[N_Sync_Seq];
 	float x;
 	float y;
 	float z;
 	uint8_t id;
 	uint8_t type;
+	uint32_t time;
+	uint8_t sync_end[N_Sync_Seq];
 };
 #undef round
+
+#define FOR_HUMAN 0
+uint32_t tick = 0;
 void send_mag(uint8_t id, float x, float y, float z) noexcept {
+#if FOR_HUMAN
+	serial_printf(
+		"Beacon [%d] mag %d (%d %d %d) ut %d %d\n",
+		(int)id,
+		(int)(sqrtf(x * x + y * y + z * z)),
+		(int)(x),
+		(int)(y),
+		(int)(z),
+		(int)tick,
+		sizeof(Output)
+	);
+	// serial_printf(
+	// 	"%d\n",
+	// 	(int)(100 * sqrtf(x * x + y * y + z * z))
+	// );
+#else
 	Output out;
 
-	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
+	out.time = tick;
 	out.type = TYPE_MAGNETOMETER;
 	out.id = id;
 	out.x = x;
@@ -146,11 +196,15 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
+#endif
+	tick += 1;
 }
 void send_acc(uint8_t id, float x, float y, float z) noexcept {
 	Output out;
 
-	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
+	out.time = tick;
 	out.type = TYPE_ACCELEROMETER;
 	out.id = id;
 	out.x = x;
@@ -158,11 +212,14 @@ void send_acc(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
+	tick += 1;
 }
 void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 	Output out;
 
-	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
+	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
+	out.time = tick;
 	out.type = TYPE_GYROSCOPE;
 	out.id = id;
 	out.x = x;
@@ -170,23 +227,24 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
+	tick += 1;
 }
 
 void loop() {
 	for (size_t i = 0; i < N_Beacons; ++i) if (beacon_healthy[i]) {
-		multiplexer.selectChannel(BEACON_BUS_MAP[i]);
+		select(BEACON_BUS_MAP[i]);
+		bool ready = beacons[i].is_data_ready();
+		unselect();
+		if (!ready) continue;
 
-		auto read = beacons[i].readRawi16();
-		send_mag(
-			(uint8_t)i,
-			read.XAxis * beacons[i].mgPerDigit,
-			read.YAxis * beacons[i].mgPerDigit,
-			read.ZAxis * beacons[i].mgPerDigit
-		);
-		
+		Vector read;
+		select(BEACON_BUS_MAP[i]);
+		beacons[i].read_ut(&read.XAxis, &read.YAxis, &read.ZAxis);
+		unselect();
+		send_mag((uint8_t)i, read.XAxis * 10, read.YAxis * 10, read.ZAxis * 10);
 	}
 	for (size_t i = 0; i < N_Imus; ++i) if (imu_healthy[i]) {
-		multiplexer.selectChannel(IMU_BUS_MAP[i]);
+		select(IMU_BUS_MAP[i]);
 
 		Vector acc;
 		Vector gyr;

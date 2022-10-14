@@ -69,5 +69,4 @@ struct State {
 
 extern void render_triangulation(State& state) noexcept;
 extern void render_estimation_trace(State& state) noexcept;
-extern void 
-update_probability_texture(State& state) noexcept;
+extern void update_probability_texture(State& state) noexcept;

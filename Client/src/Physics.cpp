@@ -206,7 +206,6 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 		auto n = b.calibration_sample;
 
 		auto s = std::sqrt((b.sum2_dist / n - (b.sum_dist / n) * (b.sum_dist / n)) * (n / (n - 1.0)));
-		s *= 10;
 		auto u = b.sum_dist / n;
 
 		u = std::hypot(read.beacons[b_idx].x, read.beacons[b_idx].y, read.beacons[b_idx].z) - u;
@@ -268,8 +267,8 @@ Simulation_Result space_sim(Simulation_Parameters& state) noexcept {
 		auto ux = read.beacons[b_idx].x - b.mean.x;
 		auto uy = read.beacons[b_idx].y - b.mean.y;
 
-		auto sx = b.std.x * 10 + std::abs(ux) * state.sensitivity;
-		auto sy = b.std.y * 10 + std::abs(uy) * state.sensitivity;
+		auto sx = b.std.x + std::abs(ux) * state.sensitivity;
+		auto sy = b.std.y + std::abs(uy) * state.sensitivity;
 
 		auto sx2 = sx*sx;
 		auto sy2 = sy*sy;
@@ -432,7 +431,7 @@ void compute_probability_grid(State& state, const Simulation_Result& result) noe
 
 			local_p *= u * (1 - t) + v * t;
 
-			double a = fast_atan2(y, x);
+			double a = std::atan2(y, x);
 			if (a < 0) a += 2 * PI;
 
 			t_low  = (int64_t)(a * angle_freq);
@@ -460,9 +459,9 @@ Input_Sampling sample_input_space(const Input_State& input_state) noexcept {
 			auto& b = input_state.beacons[i];
 			Vector3d mag;
 
-			mag.x = (r.x - b.mean.x) + b.std.x * 100 * fast_normal(seed);
-			mag.y = (r.y - b.mean.y) + b.std.y * 100 * fast_normal(seed);
-			mag.z = (r.z - b.mean.z) + b.std.z * 100 * fast_normal(seed);
+			mag.x = (r.x - b.mean.x) + b.std.x * fast_normal(seed);
+			mag.y = (r.y - b.mean.y) + b.std.y * fast_normal(seed);
+			mag.z = (r.z - b.mean.z) + b.std.z * fast_normal(seed);
 
 			sample.mag[i] = mag;
 		}
@@ -494,7 +493,7 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 
 	for (size_t x = 0; x < w * h; ++x) state.probability_grid[x] = 0;
 
-	auto solve_xy = [] (Vector3d m, Vector3d b) -> std::array<Vector2d, 4> {
+	auto solve_xy = [] (Vector3d m, Vector3d b) -> Vector2d {
 		thread_local uint32_t seed[1] = { 2 };
 		constexpr double u0 = 1.225663753e-6;
 		constexpr double PI = 3.141592653589793238462643383279502884;
@@ -538,12 +537,7 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 		// auto x = std::cos(p) * l;
 		// auto y = std::sin(p) * l;
 
-		return std::array<Vector2d, 4>{
-			Vector2d{ +x, +y },
-			Vector2d{ +x, +y },
-			Vector2d{ +x, +y },
-			Vector2d{ +x, +y }
-		};
+		return Vector2d{ +x, +y };
 	};
 
 	uint32_t seeds[32];
@@ -558,21 +552,19 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 			auto b = sample.mag[i];
 			auto m = Vector3d{0.0, 0.0, m_strength};
 
-			auto ps = solve_xy(m, b);
+			auto p = solve_xy(m, b);
 
-			for (auto& p : ps) {
-				p.x += state.beacons[i].pos.x;
-				p.y += state.beacons[i].pos.y;
+			p.x += state.beacons[i].pos.x;
+			p.y += state.beacons[i].pos.y;
 
-				int xi = (p.x - bias) / ww;
-				int yi = (p.y - bias) / ww;
+			int xi = (p.x - bias) / ww;
+			int yi = (p.y - bias) / ww;
 
-				if (
-					0 <= xi && xi < state.probability_resolution &&
-					0 <= yi && yi < state.probability_resolution
-				) {
-					state.probability_grid[xi + yi * w] += 1;
-				}
+			if (
+				0 <= xi && xi < state.probability_resolution &&
+				0 <= yi && yi < state.probability_resolution
+			) {
+				state.probability_grid[xi + yi * w] += 1;
 			}
 		}
 
@@ -596,5 +588,4 @@ void compute_probability_grid(State& state, const Input_Sampling& samplings) noe
 			}
 		}
 	}
-
 }

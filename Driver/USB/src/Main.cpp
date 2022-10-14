@@ -285,7 +285,7 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 	State* state = (State*)ptr;
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) Sync_Seq[i] = i;
-	buffer.resize(32 * sizeof(Inputs_MAG3110));
+	buffer.resize(8 * sizeof(Inputs_MAG3110));
 	auto dbuffer = buffer.data();
 
 	Reading r;
@@ -339,8 +339,8 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 			}
 
 			if (memchr(mag_reading_ready, 0, N_Beacons) != NULL) continue;
-			if (memchr(gyr_reading_ready, 0, N_Imus) != NULL) continue;
-			if (memchr(acc_reading_ready, 0, N_Imus) != NULL) continue;
+			// if (memchr(gyr_reading_ready, 0, N_Imus) != NULL) continue;
+			// if (memchr(acc_reading_ready, 0, N_Imus) != NULL) continue;
 			r.timestamp = seconds();
 
 			while (!std::atomic_compare_exchange_strong(&state->critical_section, &False, true));
@@ -354,8 +354,8 @@ __declspec(dllexport) extern "C" void play(void* ptr) {
 			if ((state->final % size) <= (state->first % size)) state->first = state->final + 1;
 
 			memset(mag_reading_ready, 0, N_Beacons);
-			memset(acc_reading_ready, 0, N_Imus);
-			memset(gyr_reading_ready, 0, N_Imus);
+			// memset(acc_reading_ready, 0, N_Imus);
+			// memset(gyr_reading_ready, 0, N_Imus);
 		}
 	}
 	state->is_stop = true;
@@ -416,9 +416,12 @@ extern "C" void read_n_samples(void* ptr, Reading* out_readings, u32 n) {
 
 			if (in.id >= N_Beacons) continue;
 
-			double tx = mmag_to_tesla(in.x);
-			double ty = mmag_to_tesla(in.y);
-			double tz = mmag_to_tesla(in.z);
+			// double tx = mmag_to_tesla(in.x);
+			// double ty = mmag_to_tesla(in.y);
+			// double tz = mmag_to_tesla(in.z);
+			double tx = in.x / 1'000'000.0;
+			double ty = in.y / 1'000'000.0;
+			double tz = in.z / 1'000'000.0;
 			double t = std::hypot(tx, ty, tz);
 
 			reading_ready[in.id] = true;

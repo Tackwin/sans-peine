@@ -219,7 +219,7 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 	for (size_t i = 0; i < N_Beacons * N_Comp; ++i) {
 		free(names[i]);
 		names[i] = (char*)malloc(sizeof("Beacons XXXXXXX"));
-		sprintf(names[i], "Beacon %d", (int)i);
+		sprintf(names[i], "Beacon %d %d", (int)(i / N_Beacons), (int)(i % N_Beacons));
 	}
 
 	lines.clear();
@@ -278,9 +278,10 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 
 	ImGui::Plot("Readings", conf);
 
-	for (size_t i = 0; i < N_Beacons; ++i) {
-		conf.values.ys_list = ys.data() + i * N_Comp;
-		conf.values.ys_count = N_Comp;
+	for (size_t i = 0; i < N_Beacons * N_Comp; ++i) {
+		conf.values.ys_list = ys.data() + i;
+		conf.values.ys_count = 1;
+		// conf.tooltip.ys_names = names.data() + i;
 		// conf.scale.min = 0.9f * std::min(mins[i], 0.f);
 		// conf.scale.max = 1.1f * std::max(maxs[i], 0.f);
 
@@ -382,6 +383,8 @@ void render_plot(const std::vector<Reading>& readings) noexcept {
 		conf.values.ys_count = ys.size();
 
 		conf.values.colors = colors;
+
+		conf.tooltip.ys_names = names.data();
 
 		ImGui::Plot("Gyroscope", conf);
 	}

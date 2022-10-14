@@ -153,6 +153,7 @@ int main(int, char**) {
 void update(State& state) noexcept {
 	thread_local std::vector<Reading> avg_readings;
 
+
 	if (state.right_clicked) {
 		if (state.n_beacons_placed >= N_Beacons) {
 			state.n_beacons_placed = 0;
@@ -197,7 +198,7 @@ void update(State& state) noexcept {
 			b.std.y = std::sqrt(b.std.y * f);
 			b.std.z = std::sqrt(b.std.z * f);
 		}
-		for (size_t i = 0; i < N_Imus; ++i) {
+		for (size_t i = 0; false && i < N_Imus; ++i) {
 			Pen& p = state.pen;
 
 			p.calibration_sample++;
@@ -229,7 +230,7 @@ void update(State& state) noexcept {
 				for (size_t i = 0; i < N_Beacons; ++i) {
 					avg.beacons[i] += x.beacons[i];
 				}
-				for (size_t i = 0; i < N_Imus; ++i) {
+				for (size_t i = 0; false && i < N_Imus; ++i) {
 					avg.accel[i] += x.accel[i];
 					avg.gyro[i] += x.gyro[i];
 				}
@@ -239,7 +240,7 @@ void update(State& state) noexcept {
 			for (size_t i = 0; i < N_Beacons; ++i) {
 				avg.beacons[i] /= avg_readings.size();
 			}
-			for (size_t i = 0; i < N_Imus; ++i) {
+			for (size_t i = 0; false && i < N_Imus; ++i) {
 				avg.accel[i] /= avg_readings.size();
 				avg.gyro[i] /= avg_readings.size();
 			}
