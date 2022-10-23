@@ -241,7 +241,7 @@ void loop() {
 		select(BEACON_BUS_MAP[i]);
 		beacons[i].read_ut(&read.XAxis, &read.YAxis, &read.ZAxis);
 		unselect();
-		send_mag((uint8_t)i, read.XAxis * 10, read.YAxis * 10, read.ZAxis * 10);
+		send_mag((uint8_t)i, read.XAxis, read.YAxis, read.ZAxis);
 	}
 	for (size_t i = 0; i < N_Imus; ++i) if (imu_healthy[i]) {
 		select(IMU_BUS_MAP[i]);

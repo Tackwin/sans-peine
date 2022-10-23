@@ -2,7 +2,6 @@
 #import "Basic";
 
 USB :: #import "USB";
-#import "Reading";
 Interface :: #import "Interface";
 #import "Thread";
 #import "Physics";
@@ -64,9 +63,11 @@ State :: struct {
 	running := false;
 
 	INPUT_RING_BUFFER_SIZE : u64 : 256;
-	inputs : [INPUT_RING_BUFFER_SIZE] Packet;
+	inputs : [INPUT_RING_BUFFER_SIZE] Interface.Packet;
 	beg_index : u64 = 0;
 	end_index : u64 = 0;
+
+	usb_buffer : [..] u8;
 }
 
 size :: (state: *State) -> int {
@@ -93,6 +94,7 @@ play :: (state: *State) {
 		init(*state.mutex, "Mutex Driver Sans Peine");
 		state.thread.data = cast(*void) state;
 		thread_start(state.thread);
+		array_reserve(*state.usb_buffer, 1024*1024);
 	}
 	state.running = true;
 }
@@ -104,7 +106,7 @@ stop :: (state: *State) {
 next :: (state: *State) -> Interface.Input, bool {
 	if state.beg_index >= state.end_index return .{}, false;
 
-	packet : Packet = ---;
+	packet : Interface.Packet = ---;
 	{
 		lock(*state.mutex);
 		defer unlock(*state.mutex);
@@ -120,6 +122,7 @@ next :: (state: *State) -> Interface.Input, bool {
 	out.time = packet.time;
 	if packet.kind == {
 		case .Magnetometer;  out.mag = packet.mag;
+			out.mag.B /= 1_000_000;
 		case .Accelerometer; out.acc = packet.acc;
 		case .Gyroscope;     out.gyr = packet.gyr;
 	}
@@ -136,7 +139,7 @@ background :: (thread: *Thread) -> s64 {
 
 	state: *State = cast(*State) thread.data;
 	while state.running {
-		packet, has_packet := read_next(state.serial, 8);
+		packet, has_packet := read_next(state, 8);
 		if !has_packet continue;
 
 		lock(*state.mutex);
@@ -149,30 +152,36 @@ background :: (thread: *Thread) -> s64 {
 	return 0;
 }
 
-usb_buffer : [..] u8;
-read_next :: (serial: USB.Serial, $n: int, allocator: Allocator = .{}) -> [] Packet, bool {
+read_next :: (
+	state: *State, $n: int, allocator: Allocator = .{}
+) -> [] Interface.Packet, bool {
 	a := ifx allocator.proc then allocator else context.allocator;
 
-	buffer : [n * size_of(Packet)] u8;
+	serial := *state.serial;
+
+	buffer : [n * size_of(Interface.Packet)] u8;
 	USB.read_to(serial, buffer);
 
-	array_add(*usb_buffer, ..buffer);
+	array_add(*state.usb_buffer, ..buffer);
 
-	for 0..usb_buffer.count-size_of(Packet) {
-		read : *Packet = cast(*Packet) (usb_buffer.data + it);
-		if memcmp(read.sync_start.data, SYNC_START_SEQ.data, SYNC_START_SEQ.count) != 0 continue;
+	for 0..state.usb_buffer.count-size_of(Interface.Packet) {
+		read : *Interface.Packet = cast(*Interface.Packet) (state.usb_buffer.data + it);
+		cmp := memcmp(
+			read.sync_start.data, Interface.SYNC_START_SEQ.data, Interface.SYNC_START_SEQ.count
+		);
+		if cmp != 0 continue;
 
-		packets := NewArray(n - (it / size_of(Packet)), Packet, false, a);
+		packets := NewArray(n - (it / size_of(Interface.Packet)), Interface.Packet, false, a);
 		for * packets { <<it = read[it_index]; }
 
-		beg := it + size_of(Packet) * n;
-		for 0..usb_buffer.count-beg-1 usb_buffer[it] = usb_buffer[beg + it];
-		usb_buffer.count -= beg;
+		beg := it + size_of(Interface.Packet) * n;
+		for 0..state.usb_buffer.count-beg-1 state.usb_buffer[it] = state.usb_buffer[beg + it];
+		state.usb_buffer.count -= beg;
 
 		return packets, true;
 	}
 
-	empty : [n] Packet = ---;
+	empty : [n] Interface.Packet = ---;
 	return empty, false;
 }
 

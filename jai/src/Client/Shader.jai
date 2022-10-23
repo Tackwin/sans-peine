@@ -2,7 +2,7 @@
 #import "Basic";
 #import "GL";
 #import "Math";
-#import "Reading";
+Physics :: #import "Physics";
 
 #scope_export
 
@@ -137,11 +137,38 @@ set_uniform :: (using shader: Shader, name: string, value: float) {
 	loc := glGetUniformLocation(program, name.data);
 	glUniform1f(loc, value);
 }
-set_uniform :: (using shader: Shader, name: string, value: V2d) {
+set_uniform :: (using shader: Shader, name: string, value: float64) {
+	glUseProgram(program);
+	loc := glGetUniformLocation(program, name.data);
+	glUniform1f(loc, xx value);
+}
+set_uniform :: (using shader: Shader, name: string, value: int) {
+	glUseProgram(program);
+	loc := glGetUniformLocation(program, name.data);
+	glUniform1i(loc, xx value);
+}
+set_uniform :: (using shader: Shader, name: string, value: Physics.V2d) {
 	glUseProgram(program);
 	loc := glGetUniformLocation(program, name.data);
 	v : [2] float32;
 	v[0] = cast(float32) value.x;
 	v[1] = cast(float32) value.y;
 	glUniform2fv(loc, 1, v.data);
+}
+set_uniform :: (using shader: Shader, name: string, value: Physics.V2f) {
+	glUseProgram(program);
+	loc := glGetUniformLocation(program, name.data);
+	v : [2] float32;
+	v[0] = cast(float32) value.x;
+	v[1] = cast(float32) value.y;
+	glUniform2fv(loc, 1, v.data);
+}
+set_uniform :: (using shader: Shader, name: string, value: Physics.V3f) {
+	glUseProgram(program);
+	loc := glGetUniformLocation(program, name.data);
+	v : [3] float32;
+	v[0] = cast(float32) value.x;
+	v[1] = cast(float32) value.y;
+	v[2] = cast(float32) value.y;
+	glUniform3fv(loc, 1, v.data);
 }
