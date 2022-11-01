@@ -97,10 +97,14 @@
 		return read;
 	};
 
-	write_windows :: (serial: Serial, buffer: [] u8) {
-		sent := 0;
-		if !Windows.WriteFile(serial.handle, buffer.data, buffer.count, *sent, 0)
+	write_windows :: (serial: Serial, buffer: [] u8) -> bool {
+		sent : u32 = 0;
+		if !Windows.WriteFile(serial.handle, buffer.data, xx buffer.count, *sent, xx 0)
+		{
 			ClearCommError(serial.handle, null, null);
+			return false;
+		}
+		return sent == buffer.count;
 	}
 }
 
@@ -140,6 +144,7 @@ read_to :: (serial: Serial, buffer: [] u8) {
 	}
 }
 
-write :: (serial: Serial, buffer: [] u8) {
-	#if OS == .WINDOWS write_windows(serial, buffer);
+write :: (serial: Serial, buffer: [] u8) -> bool {
+	#if OS == .WINDOWS return write_windows(serial, buffer);
+	return false;
 }

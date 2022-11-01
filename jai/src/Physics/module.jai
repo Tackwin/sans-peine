@@ -23,6 +23,30 @@ magnetic_field :: (m: V3($T), r: V3(T)) -> V3(T) {
 	B *= C;
 	return B;
 }
+
+magnetic_fields_avx2 :: (ms: V3f_vec, r: V3f_vec, Bs: V3f_vec) {
+	C :: cast(T) (3 * u0 / (4 * PI));
+
+	for 0..7 {
+		lr := r.xs[it] * r.xs[it] + r.ys[it] * r.ys[it]+ r.zs[it] * r.zs[it];
+		lr = sqrt(lr);
+		rr : V3f = .{ r.xs[it] / lr, r.xs[it] / lr, r.xs[it] / lr };
+		b := ms.xs[it] * rr.x + ms.ys[it] * rr.y + ms.zs[it] * rr.z;
+		Bs.xs[i] = b * rr.x;
+		Bs.ys[i] = b * rr.y;
+		Bs.zs[i] = b * rr.z;
+		Bs.xs[i] -= ms.xs[it];
+		Bs.ys[i] -= ms.ys[it];
+		Bs.zs[i] -= ms.zs[it];
+		Bs.xs[i] /= lr * lr * lr;
+		Bs.ys[i] /= lr * lr * lr;
+		Bs.zs[i] /= lr * lr * lr;
+		Bs.xs[i] *= C;
+		Bs.ys[i] *= C;
+		Bs.zs[i] *= C;
+	}
+}
+
 magnetic_field_strength :: (m: $T, r: T) -> T {
 	C :: cast(T) (3 * u0 / (4 * PI));
 
@@ -50,7 +74,7 @@ pdf :: (law: Normal($T), x: T) -> T {
 	p : T = 1;
 	p  = -0.5 * (x - law.mean) * (x - law.mean) / (law.std * law.std);
 	p  = pow(cast(T) e, p);
-	p /= law.std * sqrt(2 * PI);
+	p /= sqrt(2 * PI);
 	return p;
 }
 

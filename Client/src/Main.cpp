@@ -330,11 +330,11 @@ void update(State& state) noexcept {
 		auto start = seconds();
 		auto t1 = seconds();
 
-		// auto sim_res = space_sim(sim_params);
-		// compute_probability_grid(state, sim_res);
+		auto sim_res = space_sim(sim_params);
+		compute_probability_grid(state, sim_res);
 
-		auto input_sampling = sample_input_space(input_state);
-		compute_probability_grid(state, input_sampling);
+		// auto input_sampling = sample_input_space(input_state);
+		// compute_probability_grid(state, input_sampling);
 
 		auto w = state.probability_resolution;
 		auto h = state.probability_resolution;

@@ -136,7 +136,7 @@ void setup() {
 		
 		serial_printf("Revid of %d = %d\n", (int)i, (int)revid);
 		select(BEACON_BUS_MAP[i]);
-		beacons[i].set_cycle_count(200, 200, 200);
+		beacons[i].set_cycle_count(800, 800, 800);
 		unselect();
 		select(BEACON_BUS_MAP[i]);
 		beacons[i].set_update_rate(HZ_37);
@@ -197,7 +197,6 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
 #endif
-	tick += 1;
 }
 void send_acc(uint8_t id, float x, float y, float z) noexcept {
 	Output out;
@@ -212,7 +211,6 @@ void send_acc(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
-	tick += 1;
 }
 void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 	Output out;
@@ -227,20 +225,16 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
-	tick += 1;
 }
+
+
 
 void loop() {
 	for (size_t i = 0; i < N_Beacons; ++i) if (beacon_healthy[i]) {
 		select(BEACON_BUS_MAP[i]);
-		bool ready = beacons[i].is_data_ready();
-		unselect();
-		if (!ready) continue;
-
+		if (!beacons[i].is_data_ready()) continue;
 		Vector read;
-		select(BEACON_BUS_MAP[i]);
 		beacons[i].read_ut(&read.XAxis, &read.YAxis, &read.ZAxis);
-		unselect();
 		send_mag((uint8_t)i, read.XAxis, read.YAxis, read.ZAxis);
 	}
 	for (size_t i = 0; i < N_Imus; ++i) if (imu_healthy[i]) {
@@ -264,4 +258,45 @@ void loop() {
 		send_gyr((uint8_t)i, gyr.XAxis, gyr.YAxis, gyr.ZAxis);
 		// serial_printf("X %d Y %d Z %d\n", (int)(1000000 * gyr.XAxis), (int)(1000000 * gyr.YAxis), (int)(1000000 * gyr.ZAxis));
 	}
+	tick += 1;
+	delay(10);
+
+	// if (Serial.available() > 0) {
+	// 	#if FOR_HUMAN
+	// 	serial_printf("Reading...\n");
+	// 	#endif
+
+	// 	int size = Serial.read();
+
+	// 	char buffer[1024];
+	// 	Serial.readBytes(buffer, size - 1);
+
+	// 	int type = buffer[1];
+
+	// 	if (type == 1) {
+	// 		float datarate = *(float*)(buffer + 2);
+
+	// 		Data_Rate to_set;
+	// 		if (datarate > 600)        to_set = HZ_600;
+	// 		else if (datarate > 300)   to_set = HZ_300;
+	// 		else if (datarate > 150)   to_set = HZ_150;
+	// 		else if (datarate > 75)    to_set = HZ_75;
+	// 		else if (datarate > 37)    to_set = HZ_37;
+	// 		else if (datarate > 18)    to_set = HZ_18;
+	// 		else if (datarate > 9)     to_set = HZ_9;
+	// 		else if (datarate > 4.5)   to_set = HZ_4_5;
+	// 		else if (datarate > 2.3)   to_set = HZ_2_3;
+	// 		else if (datarate > 1.2)   to_set = HZ_1_2;
+	// 		else if (datarate > 0.6)   to_set = HZ_0_6;
+	// 		else if (datarate > 0.3)   to_set = HZ_0_3;
+	// 		else if (datarate > 0.15)  to_set = HZ_0_15;
+	// 		else if (datarate > 0.075) to_set = HZ_0_075;
+
+	// 		for (size_t i = 0; i < N_Beacons; i += 1) {
+	// 			select(BEACON_BUS_MAP[i]);
+	// 			beacons[i].set_update_rate(to_set);
+	// 			unselect();
+	// 		}
+	// 	}
+	// }
 }

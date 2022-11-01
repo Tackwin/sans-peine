@@ -41,7 +41,15 @@ Input :: struct {
 };
 
 
-
+Command :: struct {
+	DataRate :: struct {
+		hz: float = 0;
+	}
+	union {
+		data_rate: DataRate;
+	}
+	type: Type;
+}
 
 Init_Result :: struct {
 	success := false;
@@ -56,6 +64,7 @@ Driver :: struct {
 	play : (mem: *u8) = null;
 	stop : (mem: *u8) = null;
 	next : (mem: *u8) -> Input, bool = null;
+	send : (mem: *u8, c: Command) -> bool = null;
 }
 
 size :: (driver: Driver) -> int{
@@ -79,4 +88,8 @@ next :: (driver: Driver) -> Input, bool {
 	if !driver.next return .{}, false;
 	a, b := driver.next(driver.memory);
 	return a, b;
+}
+send :: (driver: Driver, c: Command) -> bool {
+	if !driver.send return false;
+	return driver.send(driver.memory, c);
 }

@@ -1137,7 +1137,7 @@ void main() {
 	}
 	else {
 		vec2 m = normalize(n0 + n1);
-		float dy = w / dot(m, n1);
+		float dy = w / max(dot(m, n1), 0.5);
 		uv = vec2(curr.w, curr.z * w);
 		p = curr.xy + dy * curr.z * m;
 	}

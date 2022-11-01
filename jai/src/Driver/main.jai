@@ -51,6 +51,11 @@ make_interface :: () -> string {
 }
 
 #insert #run make_interface();
+#program_export "send"
+_send :: (memory: *u8, c: Interface.Command) -> bool {
+	state: *State = cast(*State) memory;
+	return send(state, c);
+}
 
 #scope_export
 
@@ -94,7 +99,7 @@ play :: (state: *State) {
 		init(*state.mutex, "Mutex Driver Sans Peine");
 		state.thread.data = cast(*void) state;
 		thread_start(state.thread);
-		array_reserve(*state.usb_buffer, 1024*1024);
+		array_reserve(*state.usb_buffer, 1024*1024*32);
 	}
 	state.running = true;
 }
@@ -127,6 +132,33 @@ next :: (state: *State) -> Interface.Input, bool {
 		case .Gyroscope;     out.gyr = packet.gyr;
 	}
 	return out, true;
+}
+
+send :: (state: *State, c: Interface.Command) -> bool {
+	Packet :: struct {
+		size: u8;
+		kind: u8;
+		payload: union {
+			data_rate: Interface.Command.DataRate;
+		}
+		using payload;
+	}
+
+	packet: Packet = ---;
+	packet.kind = 0;
+	memcpy(*packet.payload, *c.data_rate, size_of(type_of(packet.data_rate)));
+
+	buffer: [] u8;
+	buffer.data = cast(*u8) *packet;
+	buffer.count = size_of(Packet);
+
+	buffer[0] = size_of(Packet);
+	{
+		lock(*state.mutex);
+		defer unlock(*state.mutex);
+		USB.write(state.serial, buffer);
+	}
+	return true;
 }
 
 background :: (thread: *Thread) -> s64 {
@@ -162,27 +194,32 @@ read_next :: (
 	buffer : [n * size_of(Interface.Packet)] u8;
 	USB.read_to(serial, buffer);
 
+	// if (state.usb_buffer.count + buffer.count < state.usb_buffer.allocated)
 	array_add(*state.usb_buffer, ..buffer);
 
-	for 0..state.usb_buffer.count-size_of(Interface.Packet) {
+	packets := NewArray(n, Interface.Packet, false, a);
+	packets_added := 0;
+
+	beg := 0;
+	for 0..state.usb_buffer.count-size_of(Interface.Packet)-1 {
+		beg += 1;
 		read : *Interface.Packet = cast(*Interface.Packet) (state.usb_buffer.data + it);
 		cmp := memcmp(
 			read.sync_start.data, Interface.SYNC_START_SEQ.data, Interface.SYNC_START_SEQ.count
 		);
 		if cmp != 0 continue;
 
-		packets := NewArray(n - (it / size_of(Interface.Packet)), Interface.Packet, false, a);
-		for * packets { <<it = read[it_index]; }
+		packets[packets_added] = <<read;
+		packets_added += 1;
+		if packets_added >= packets.count break;
 
-		beg := it + size_of(Interface.Packet) * n;
-		for 0..state.usb_buffer.count-beg-1 state.usb_buffer[it] = state.usb_buffer[beg + it];
-		state.usb_buffer.count -= beg;
+		// state.usb_buffer.count = max(state.usb_buffer.count, 0);
 
-		return packets, true;
 	}
+	for 0..state.usb_buffer.count-beg-1 state.usb_buffer[it] = state.usb_buffer[beg + it];
+	state.usb_buffer.count -= beg;
 
-	empty : [n] Interface.Packet = ---;
-	return empty, false;
+	return packets, true;
 }
 
 main :: () {

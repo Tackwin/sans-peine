@@ -9,3 +9,6 @@
 **/*.pdb
 **/*.ilk
 **/ease_build
+.build
+*.dll
+*.exp

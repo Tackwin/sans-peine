@@ -69,6 +69,7 @@ inspect :: (name: *u8, data: *void, info:*Type_Info, show_node_func: Show_Node_F
     to_temp_c_string :: (str: string) -> *u8 {
         buffer : *u8 = alloc(str.count + 1, temp);
         memcpy(buffer, str.data, str.count);
+        buffer[str.count] = 0;
         return buffer;
     }
     

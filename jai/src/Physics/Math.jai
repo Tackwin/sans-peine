@@ -4,6 +4,8 @@
 #import "Random";
 #import "Basic";
 #import "Sort";
+#import "xDebug";
+MKL :: #import "mkl";
 Simulation :: #import "Simulation";
 
 #scope_export
@@ -42,6 +44,12 @@ V2d :: V2(float64);
 V3f :: V3(float32);
 V3d :: V3(float64);
 
+V3f_vec :: struct {
+	xs: [8] float32;
+	ys: [8] float32;
+	zs: [8] float32;
+};
+
 Cast :: (x: V3($T), $U: Type) -> V3(U) {
 	return V3(U).make(cast(U) x.x, cast(U) x.y, cast(U) x.z);
 }
@@ -50,6 +58,14 @@ Matrix :: struct(T: Type) {
 	elements: [] T;
 	rows: int;
 	cols: int;
+
+	make :: (r: int, c: int, $to_init: bool, a: Allocator = .{}) -> Matrix(T) {
+		m: Matrix(T) = ---;
+		m.rows = r;
+		m.cols = r;
+		m.elements = NewArray(r * c, T, to_init, a);
+		return m;
+	}
 }
 
 Matrixd :: Matrix(float64);
@@ -74,6 +90,77 @@ print :: (m: Matrix($T), format: FormatFloat = .{}) {
 
 at :: (m: Matrix($T), x: int, y: int) -> *T {
 	return m.elements.data + x + y * m.cols;
+}
+
+solve_square :: (A: Matrix($T), b: [] T, x: [] T) -> [] T {
+	assert(A.rows == A.cols);
+
+	status: s64 = 0;
+
+	lu := NewArray(A.rows * A.cols, T, false, temp);
+	ipiv := NewArray(max(1, min(A.rows, A.cols)), s64, false, temp);
+
+	memcpy(lu.data, A.elements.data, A.elements.count * size_of(T));
+	status = MKL.LAPACKE_sgetrf(
+		MKL.LAPACK_ROW_MAJOR,
+		A.rows,
+		A.cols,
+		lu.data,
+		A.cols,
+		ipiv.data
+	);
+
+	memcpy(x.data, b.data, b.count * size_of(T));
+	status = MKL.LAPACKE_sgetrs(
+		MKL.LAPACK_ROW_MAJOR,
+		#char "N",
+		b.count,
+		1,
+		lu.data,
+		A.rows,
+		ipiv.data,
+		x.data,
+		1
+	);
+
+	return x;
+}
+
+RBF :: (
+	samples_x: [] V2($T),
+	samples_y: [] T,
+	phi: (T) -> T,
+	region: *Simulation.Region,
+	allocator: Allocator = .{}
+) -> Matrix(T) {
+	mat := Matrix(T).make(region.matrix.rows, region.matrix.cols, false, allocator);
+
+	A := Matrix(T).make(samples_x.count, samples_x.count, false, temp);
+	f := NewArray(samples_y.count, T, false, temp);
+
+	for a, i: samples_x for b, j: samples_x A.elements[i * A.cols + j] = phi(length(b - a));
+	for samples_y f[it_index] = it;
+
+	w := NewArray(samples_y.count, T, false, temp);
+	{
+		scope_timer("solve");
+		solve_square(A, f, w);
+	}
+
+	for y: 0..mat.rows-1 for x: 0..mat.cols-1 {
+		p := Simulation.transform(region, x, y);
+		
+		s : float32 = 0;
+		for w s += it * phi(length(p - samples_x[it_index]));
+		mat.elements[x + y * mat.cols] = s;
+	}
+
+	mi := +FLOAT32_MAX;
+	ma := -FLOAT32_MAX;
+	for mat.elements ma = max(ma, it);
+	for mat.elements mi = min(mi, it);
+	for * mat.elements { <<it = (<<it - mi) / (ma - mi); }
+	return mat;
 }
 
 inv_interpolate :: (
@@ -147,6 +234,9 @@ operator * :: (a: V2($T), b: T) -> V2(T) #symmetric {
 operator / :: (a: V2($T), b: T) -> V2(T) {
 	return V2(T).make(a.x / b, a.y / b);
 }
+operator == :: (a: V2($T), b: T) -> bool {
+	return a.x == b.x && a.y == b.y;
+}
 
 random :: ($T: Type) -> T {
 	#if T == float32 {
@@ -164,10 +254,7 @@ sample_from :: (mat: Matrix($T), n: int, allocator : Allocator = .{}) -> [] V2(T
 	sum_mat : T = 0;
 	for mat.elements sum_mat += it;
 
-	samples := NewArray(n, V2(T), false, allocator);
-
-	indices := NewArray(n, int, false, temp);
-	for * indices { <<it = it_index; }
+	samples := NewArray(n, V2(T), true, allocator);
 
 	Pair :: struct {
 		rng: T;
@@ -187,6 +274,7 @@ sample_from :: (mat: Matrix($T), n: int, allocator : Allocator = .{}) -> [] V2(T
 		
 		sum += mat.elements[it] / sum_mat;
 
+		added := false;
 		for cursor..mc_samples.count-1 {
 			if mc_samples[it].rng > sum break;
 
@@ -198,6 +286,7 @@ sample_from :: (mat: Matrix($T), n: int, allocator : Allocator = .{}) -> [] V2(T
 		if cursor >= mc_samples.count break;
 	}
 
+	samples.count = cursor;
 	return samples;
 }
 

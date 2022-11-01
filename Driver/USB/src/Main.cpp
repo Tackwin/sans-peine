@@ -168,6 +168,7 @@ struct Inputs_MAG3110 {
 	float y;
 	float z;
 	std::uint8_t id;
+	std::uint32_t time;
 	std::uint8_t type;
 };
 
