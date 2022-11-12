@@ -57,3 +57,9 @@ system_is_complete :: (using this: System_Reading) -> bool {
 	for magnetometer_readings if !it.valid return false;
 	return true;
 }
+
+interpolate :: (a: Magnetometer, b: Magnetometer, t: float) -> Magnetometer {
+	c: Magnetometer = ---;
+	c.B = (b.B - a.B) * t + a.B;
+	return c;
+}

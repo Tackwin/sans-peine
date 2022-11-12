@@ -14,7 +14,7 @@ V2 :: struct(T: Type) {
 	x: T;
 	y: T;
 
-	make :: (x: T, y: T) -> V2(T) {
+	make :: (x: T, y: T) -> V2(T) #c_call {
 		v: V2(T) = ---;
 		v.x = x;
 		v.y = y;
@@ -30,7 +30,7 @@ V3 :: struct(T: Type) {
 	xy: V2(T);
 	#place y;
 	yz: V2(T);
-	make :: (x: T, y: T, z: T) -> V3(T) {
+	make :: (x: T, y: T, z: T) -> V3(T) #c_call {
 		v: V3(T) = ---;
 		v.x = x;
 		v.y = y;
@@ -48,7 +48,7 @@ V3f_vec :: struct {
 	xs: [8] float32;
 	ys: [8] float32;
 	zs: [8] float32;
-};
+} #no_padding;
 
 Cast :: (x: V3($T), $U: Type) -> V3(U) {
 	return V3(U).make(cast(U) x.x, cast(U) x.y, cast(U) x.z);
@@ -211,11 +211,23 @@ dot :: (a: V3($T), b: V3(T)) -> T {
 operator * :: (a: V3($T), b: T) -> V3(T) #symmetric {
 	return V3(T).make(a.x * b, a.y * b, a.z * b);
 }
+operator * :: (a: *V3($T), b: T) -> V3(T) #symmetric {
+	return V3(T).make(a.x * b, a.y * b, a.z * b);
+}
 operator / :: (a: V3($T), b: T) -> V3(T) {
+	return V3(T).make(a.x / b, a.y / b, a.z / b);
+}
+operator / :: (a: *V3($T), b: T) -> V3(T) {
 	return V3(T).make(a.x / b, a.y / b, a.z / b);
 }
 operator - :: (a: V3($T), b: V3(T)) -> V3(T) {
 	return V3(T).make(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+operator - :: (a: *V3($T), b: V3(T)) -> V3(T) {
+	return V3(T).make(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+operator + :: (a: *V3($T), b: V3(T)) -> V3(T) {
+	return V3(T).make(a.x + b.x, a.y + b.y, a.z + b.z);
 }
 operator + :: (a: V3($T), b: V3(T)) -> V3(T) {
 	return V3(T).make(a.x + b.x, a.y + b.y, a.z + b.z);
@@ -225,6 +237,9 @@ operator + :: (a: V3($T), b: V3(T)) -> V3(T) {
 operator - :: (a: V2($T), b: V2(T)) -> V2(T) {
 	return V2(T).make(a.x - b.x, a.y - b.y);
 }
+operator + :: (a: *V2($T), b: V2(T)) -> V2(T) {
+	return V2(T).make(a.x + b.x, a.y + b.y);
+}
 operator + :: (a: V2($T), b: V2(T)) -> V2(T) {
 	return V2(T).make(a.x + b.x, a.y + b.y);
 }
@@ -232,6 +247,9 @@ operator * :: (a: V2($T), b: T) -> V2(T) #symmetric {
 	return V2(T).make(a.x * b, a.y * b);
 }
 operator / :: (a: V2($T), b: T) -> V2(T) {
+	return V2(T).make(a.x / b, a.y / b);
+}
+operator / :: (a: *V2($T), b: T) -> V2(T) {
 	return V2(T).make(a.x / b, a.y / b);
 }
 operator == :: (a: V2($T), b: T) -> bool {

@@ -8,8 +8,12 @@ Physics :: #import "Physics";
 Data :: #import "Data";
 Simulation :: #import "Simulation";
 Debug :: #import "xDebug";
+Tracy :: #import "Tracy";
+CLI :: #import "Command_Line";
+
 #import "Random";
 #import "File";
+#import "File_Watcher";
 
 #import "Window_Creation";
 #import "Input";
@@ -26,6 +30,7 @@ Ui :: struct {
 
 	exit := false;
 	demo_window_open := true;
+	timeline_window_open := true;
 
 	camera_size : Physics.V2f = .{ 0.72, 0.405 };
 	camera_pos  : Physics.V2f = .{ 0.0, 0.0 };
@@ -36,6 +41,7 @@ Ui :: struct {
 
 	pause := false;
 	interactive : struct {
+		open_timeline := false; @trigger;
 		clear_beacon := false; @trigger;
 		default_beacon := true; @trigger;
 
@@ -61,8 +67,7 @@ Ui :: struct {
 		record_inputs := false;
 		clear_records := false; @trigger;
 
-		evaluation_rate := 100;
-		Sensor_Hertz :: 100;
+		Sensor_Hertz :: 1000;
 
 	};
 	using interactive;
@@ -72,6 +77,11 @@ Ui :: struct {
 		mouse_pos : Physics.V2f;
 		left_clicked := false;
 	};
+
+	Dyn_Proc :: struct {
+		input_timeline: (systems: *[..] Data.System_Reading) = null;
+	};
+	dyn_proc: Dyn_Proc;
 };
 
 State :: struct {
@@ -95,6 +105,8 @@ State :: struct {
 	pos_samples : [..] Physics.V2f;
 
 	time_record_loop_begin: s64;
+
+	ui_dll_watcher: File_Watcher;
 }
 
 #add_context state: State;
@@ -131,29 +143,29 @@ app_input :: () {
 	}
 }
 
-pen_input :: () {
+handle_input :: (input: Interface.Input) {
 	using context.state;
-	handle_input :: (input: Interface.Input) {
-		using context.state;
-		if ui.pause return;
+	if ui.pause return;
 
-		array_add(*pending_inputs, input);
+	array_add(*pending_inputs, input);
 
-		if ui.interactive.record_inputs {
-			make_directory_if_it_does_not_exist("records/");
+	if ui.interactive.record_inputs {
+		make_directory_if_it_does_not_exist("records/");
 
-			file, opened := file_open(
-				"records/record.dat", for_writing=true, keep_existing_content=true
-			);
+		file, opened := file_open(
+			"records/record.dat", for_writing=true, keep_existing_content=true
+		);
 
-			if opened {
-				cursor := file_length(file);
-				file_set_position(*file, cursor);
-				file_write(*file, *input, size_of(type_of(input)));
-				file_close(*file);
-			}
+		if opened {
+			cursor := file_length(file);
+			file_set_position(*file, cursor);
+			file_write(*file, *input, size_of(type_of(input)));
+			file_close(*file);
 		}
 	}
+}
+pen_input :: () {
+	using context.state;
 
 	if context.state.ui.interactive.replay_inputs___ {
 		file, openend := read_entire_file("records/record.dat");
@@ -244,6 +256,12 @@ app_update :: () {
 		cmd.data_rate.hz = ui.data_rate;
 		Interface.send(current_driver, cmd);
 	}
+
+	if ui.interactive.open_timeline {
+		defer ui.interactive.open_timeline = false;
+
+		ui.timeline_window_open = true;
+	}
 }
 
 pen_calibrating :: (input: Interface.Input) {
@@ -281,6 +299,7 @@ pen_calibrating :: (input: Interface.Input) {
 	}
 }
 
+pen_update_mark := "pen_update";
 pen_update :: (input: Interface.Input) {
 	using context.state;
 	context_state := *context.state;
@@ -291,17 +310,35 @@ pen_update :: (input: Interface.Input) {
 		return;
 	}
 	
+	last_magnetometers: [2] Data.Reading(Data.Magnetometer);
+	for < past_inputs {
+		if !last_magnetometers[it.id].valid {
+			last_magnetometers[it.id].payload = it.mag;
+			last_magnetometers[it.id].valid = true;
+			last_magnetometers[it.id].interpolated_beg = it.time;
+		}
+
+		if last_magnetometers[0].valid && last_magnetometers[1].valid break;
+	}
+
 	if min_time > input.time min_time = input.time;
+
+	add_system :: (it: int) #expand {
+		system: Data.System_Reading;
+		system.time = (it * 1000) / ui.Sensor_Hertz + min_time;
+		for * system.magnetometer_readings if last_magnetometers[it_index].valid {
+			it.interpolated_beg = last_magnetometers[it_index].interpolated_beg;
+			it.beg = last_magnetometers[it_index].payload;
+		}
+
+		array_add(*systems, system);
+	}
 
 	if max_time <= input.time {
 		max_time = input.time;
 		t := max_time - min_time;
 
-		for systems.count..cast(int) ceil(cast(float32) t * ui.Sensor_Hertz / 100.0) {
-			system: Data.System_Reading;
-			system.time = (it * 100) / ui.Sensor_Hertz + min_time;
-			array_add(*systems, system);
-		}
+		for systems.count..cast(int)ceil(cast(float32) t * ui.Sensor_Hertz / 1000.0) add_system(it);
 	}
 
 	system_to_compute := NewArray(systems.count, s64, false, temp);
@@ -310,7 +347,6 @@ pen_update :: (input: Interface.Input) {
 		`system_to_compute.count += 1;
 		`system_to_compute[`system_to_compute.count - 1] = idx;
 	}
-
 	for *system, it_index: systems {
 		mag := *system.magnetometer_readings[input.id];
 
@@ -333,9 +369,15 @@ pen_update :: (input: Interface.Input) {
 			mag.valid = true;
 			mag.measured = false;
 			if input.time > system.time
+			{
 				mag.interpolated_end = min(mag.interpolated_end, input.time);
+				mag.end = input.mag;
+			}
 			if input.time < system.time
+			{
 				mag.interpolated_beg = min(mag.interpolated_beg, input.time);
+				mag.beg = input.mag;
+			}
 			mark_to_compute(it_index);
 			continue;
 		}
@@ -355,15 +397,17 @@ pen_update :: (input: Interface.Input) {
 	n := 0;
 	for idx: system_to_compute if systems[idx].valid {
 		it := *systems[idx];
-		if n < 1 update_system(it);
-		else it.valid = false;
+		update_system(it);
 		n += 1;
 	}
 }
 
+update_system_mark := "update_system";
 update_system :: (system: *Data.System_Reading) {
 	using context.state;
-
+	Tracy.___tracy_emit_frame_mark_start(update_system_mark.data);
+	defer Tracy.___tracy_emit_frame_mark_end(update_system_mark.data);
+	Tracy.ZONE("update_system");
 	Basis_N :: 5;
 	// pos := NewArray(Basis_N*Basis_N, Physics.V2f, false, temp);
 	// for x: 0..Basis_N-1 for y: 0..Basis_N-1 {
@@ -398,7 +442,15 @@ update_system :: (system: *Data.System_Reading) {
 	for b, b_idx: beacons {
 		if !(b.std.x > 0 && b.std.y > 0 && b.std.z > 0) continue;
 
+		reading := system.magnetometer_readings[b_idx];
 		mag := system.magnetometer_readings[b_idx].payload;
+		if reading.interpolated_beg != S64_MIN && reading.interpolated_end != S64_MAX {
+			if !reading.measured {
+				t := cast(float) (reading.interpolated_end - reading.interpolated_beg);
+				t = (system.time - reading.interpolated_beg) / t;
+				mag = Data.interpolate(reading.beg, reading.end, t);
+			}
+		}
 
 		Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *region);
 		// Simulation.estimate_to(
@@ -449,6 +501,14 @@ render_imgui :: () {
 	dockspace_id := ImGui.GetID("MyDockSpace");
 	ImGui.DockSpace(dockspace_id, .{ 0.0, 0.0 }, dockspace_flags);
 
+	timeline_ :: () {
+		using context.state;
+		defer ImGui.End();
+		if !ImGui.Begin("Timeline", *ui.timeline_window_open) return;
+
+		if ui.dyn_proc.input_timeline ui.dyn_proc.input_timeline(*systems);
+	} timeline_();
+
 	ImGui.Begin("Test");
 	defer ImGui.End();
 
@@ -481,8 +541,11 @@ render_imgui :: () {
 	
 	if ImGui.CollapsingHeader("Info", .DefaultOpen) {
 		for beacons {
-			ImGui.Text(tprint("std:  % % %\0", it.std.x, it.std.y, it.std.z).data);
-			ImGui.Text(tprint("mean: % % %\0", it.mean.x, it.mean.y, it.mean.z).data);
+			using Physics;
+			std := it.std * 1000 * 1000;
+			mean := it.mean * 1000 * 1000;
+			ImGui.Text(tprint("std  (µT): % % %\0", std.x, std.y, std.z).data);
+			ImGui.Text(tprint("mean (µT): % % %\0", mean.x, mean.y, mean.z).data);
 		}
 		ImGui.Text(
 			tprint("Inputs: Pending % Past %\0", pending_inputs.count, past_inputs.count).data
@@ -578,9 +641,49 @@ render :: () {
 	);
 }
 
+Args :: struct {
+	run: string;
+}
+
 
 main :: () {
 	using context.state;
+
+	Tracy.set_thread_name("Main");
+	success, args, is_set := CLI.parse_arguments(Args);
+	region.space_origin = .{0, 0};
+	region.space_size = .{0.3, 0.3};
+	region.matrix.rows = 150;
+	region.matrix.cols = 150;
+	region.matrix.elements = NewArray(region.matrix.rows * region.matrix.cols, float32);
+	defer free(region.matrix.elements.data);
+	
+	print("%\n", args);
+	if is_set.run {
+		beacons.count = 0;
+
+		b: Data.Beacon;
+		b.pos = Physics.V2f.make(-0.2, -0.07);
+		array_add(*beacons, b);
+		b.pos = Physics.V2f.make(-0.2, +0.07);
+		array_add(*beacons, b);
+
+		file, openend := read_entire_file("records/record.dat");
+		inputs_read: [] Interface.Input;
+		inputs_read.data = xx file.data;
+		inputs_read.count = file.count / size_of(Interface.Input);
+
+		ui.interactive.calibrating = true;
+		t0 := to_nanoseconds(current_time_monotonic());
+		for inputs_read {
+			pen_update(it);
+			t1 := to_nanoseconds(current_time_monotonic());
+			if (it_index % 10) == 0
+				print("Handled % inputs in %s\n", it_index, (t1 - t0) / 1000000000.0);
+		}
+
+		return;
+	}
 
 	ui.window = create_window(1200, 675, "ImGui OpenGL Test");
 	setup_mousemove_hook();
@@ -592,15 +695,16 @@ main :: () {
 	ImGui_GL.ImGui_Impl_CreateContext(*ui.imgui, set_default_allocators=true);
 	ImGui_GL.ImGui_Impl_Init(*ui.imgui, ui.window);
 
+	context.state.ui.dyn_proc = load_ui("dll/ui.dll");
+	init(*ui_dll_watcher, (watcher: *File_Watcher, change: *File_Change) {
+		context.state.ui.dyn_proc = load_ui("dll/ui.dll");
+	}, .MODIFIED);
+	defer deinit(ui_dll_watcher);
+	add_directories(*ui_dll_watcher, "dll");
+
 	current_time: float64;
 	last_time: float64;
 
-	region.space_origin = .{0, 0};
-	region.space_size = .{0.3, 0.3};
-	region.matrix.rows = 50;
-	region.matrix.cols = 50;
-	region.matrix.elements = NewArray(region.matrix.rows * region.matrix.cols, float32);
-	defer free(region.matrix.elements.data);
 
 	for * region.matrix.elements { <<it = (random_get() % 255) / 255.0; }
  
@@ -625,6 +729,7 @@ main :: () {
 		context.state.dt32 = cast(float32)(current_time - last_time);
 		defer last_time = current_time;
 
+		process_changes(*ui_dll_watcher);
 		update_window_events();
 		app_input();
 		app_update();
@@ -742,9 +847,11 @@ DONE;
 	HOOKPROC :: #type (code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #c_call;
 	WH_MOUSE :: 7;
 	user32 :: #foreign_system_library "user32";
+	kernel32 :: #foreign_system_library "kernel32";
 
 	CallNextHookEx    :: (hhk: HHOOK, code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #foreign user32;
 	SetWindowsHookExA :: (id_hook: s32, hook_fn: HOOKPROC, hmod: HINSTANCE, thread_id: DWORD) -> HHOOK #foreign user32;
+	FreeLibrary       :: (module: HMODULE) -> BOOL #foreign kernel32;
 
 	HookProc :: (code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #c_call {
 		return CallNextHookEx(null, code, wparam, lparam);
@@ -771,6 +878,21 @@ DONE;
 		driver.stop = xx GetProcAddress(dll, "stop");
 		driver.next = xx GetProcAddress(dll, "next");
 		return driver;
+	}
+
+	ui_dll: HMODULE;
+
+	load_ui :: ($name: string) -> Ui.Dyn_Proc {
+		if ui_dll FreeLibrary(ui_dll);
+
+		make_directory_if_it_does_not_exist("temp");
+		CopyFileA(name, "temp/temp.dll", 0);
+		ui_dll = LoadLibraryA("temp/temp.dll");
+		if !ui_dll return .{};
+
+		ret: Ui.Dyn_Proc;
+		ret.input_timeline = xx GetProcAddress(ui_dll, "input_timeline");
+		return ret;
 	}
 }
 

@@ -105,10 +105,6 @@ ImSaturate :: (x: float) -> float { return ifx x < 0 then 0 else (ifx x < 1 then
 ImMin :: (a: $T, b: T) -> T { if a < b return a; else return b; }
 ImMax :: (a: $T, b: T) -> T { if a > b return a; else return b; }
 
-ImRect :: struct {
-	Min: ImGui.ImVec2;
-	Max: ImGui.ImVec2;
-}
 Contains :: (rect: ImRect, v: ImVec2) -> bool {
 	return
 		rect.Min.x < v.x && v.x < rect.Max.x &&

@@ -18,7 +18,7 @@ constexpr size_t N_Sync_Seq = 16;
 // High availability, bad perf
 
 // MMC5983MA
-// 0.4/0.6/0.8/1.2 mG RMS
+// 0.4/0.6/0.8/1.2 mG RMSevaluation_rate
 // 50/100/225/580 hz
 
 // MMC34160PJ
@@ -259,7 +259,7 @@ void loop() {
 		// serial_printf("X %d Y %d Z %d\n", (int)(1000000 * gyr.XAxis), (int)(1000000 * gyr.YAxis), (int)(1000000 * gyr.ZAxis));
 	}
 	tick += 1;
-	delay(10);
+	delay(1);
 
 	// if (Serial.available() > 0) {
 	// 	#if FOR_HUMAN
