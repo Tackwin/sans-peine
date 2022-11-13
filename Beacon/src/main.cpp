@@ -9,7 +9,7 @@
 #include <math.h>
 
 constexpr size_t N_Beacons = 2;
-constexpr size_t N_Imus = 0;
+constexpr size_t N_Imus = 2;
 constexpr size_t N_Sync_Seq = 16;
 
 // HMC5883L
@@ -51,7 +51,7 @@ TCA9548 multiplexer(0x70);
 size_t BEACON_BUS_MAP[] = {2, 7, 7, 6, 6, 7, 6, 7};
 
 GY521 imus[N_Imus];
-size_t IMU_BUS_MAP[] = {2, 3, 3, 3, 3, 3, 3, 3};
+size_t IMU_BUS_MAP[] = {0, 1, 3, 3, 3, 3, 3, 3};
 bool imu_healthy[N_Imus] = { };
 
 constexpr size_t ROLLING = 1;
@@ -199,6 +199,19 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 #endif
 }
 void send_acc(uint8_t id, float x, float y, float z) noexcept {
+#if FOR_HUMAN
+	serial_printf(
+		"Beacon [%d] acc %d (%d %d %d) mG %d %d\n",
+		(int)id,
+		(int)(sqrtf(x * x + y * y + z * z) * 1000),
+		(int)(x * 1000),
+		(int)(y * 1000),
+		(int)(z * 1000),
+		(int)tick,
+		sizeof(Output)
+	);
+#else
+
 	Output out;
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
@@ -211,8 +224,26 @@ void send_acc(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
+#endif
 }
 void send_gyr(uint8_t id, float x, float y, float z) noexcept {
+
+#if FOR_HUMAN
+	serial_printf(
+		"Beacon [%d] gyr %d (%d %d %d) ut %d %d\n",
+		(int)id,
+		(int)(sqrtf(x * x + y * y + z * z)),
+		(int)(x),
+		(int)(y),
+		(int)(z),
+		(int)tick,
+		sizeof(Output)
+	);
+	// serial_printf(
+	// 	"%d\n",
+	// 	(int)(100 * sqrtf(x * x + y * y + z * z))
+	// );
+#else
 	Output out;
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
@@ -225,6 +256,7 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 	out.z = z;
 
 	Serial.write(reinterpret_cast<uint8_t*>(&out), sizeof(Output));
+#endif
 }
 
 

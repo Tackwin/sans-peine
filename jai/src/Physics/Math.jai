@@ -5,7 +5,7 @@
 #import "Basic";
 #import "Sort";
 #import "xDebug";
-MKL :: #import "mkl";
+// MKL :: #import "mkl";
 Simulation :: #import "Simulation";
 
 #scope_export
@@ -48,6 +48,16 @@ V3f_vec :: struct {
 	xs: [8] float32;
 	ys: [8] float32;
 	zs: [8] float32;
+
+	fill :: (x: float32, y: float32, z: float32) -> V3f_vec {
+		vec: V3f_vec = ---;
+		for 0..7 {
+			vec.xs[it] = x;
+			vec.ys[it] = y;
+			vec.zs[it] = z;
+		}
+		return vec;
+	}
 } #no_padding;
 
 Cast :: (x: V3($T), $U: Type) -> V3(U) {
@@ -93,37 +103,38 @@ at :: (m: Matrix($T), x: int, y: int) -> *T {
 }
 
 solve_square :: (A: Matrix($T), b: [] T, x: [] T) -> [] T {
-	assert(A.rows == A.cols);
-
-	status: s64 = 0;
-
-	lu := NewArray(A.rows * A.cols, T, false, temp);
-	ipiv := NewArray(max(1, min(A.rows, A.cols)), s64, false, temp);
-
-	memcpy(lu.data, A.elements.data, A.elements.count * size_of(T));
-	status = MKL.LAPACKE_sgetrf(
-		MKL.LAPACK_ROW_MAJOR,
-		A.rows,
-		A.cols,
-		lu.data,
-		A.cols,
-		ipiv.data
-	);
-
-	memcpy(x.data, b.data, b.count * size_of(T));
-	status = MKL.LAPACKE_sgetrs(
-		MKL.LAPACK_ROW_MAJOR,
-		#char "N",
-		b.count,
-		1,
-		lu.data,
-		A.rows,
-		ipiv.data,
-		x.data,
-		1
-	);
-
 	return x;
+	// assert(A.rows == A.cols);
+
+	// status: s64 = 0;
+
+	// lu := NewArray(A.rows * A.cols, T, false, temp);
+	// ipiv := NewArray(max(1, min(A.rows, A.cols)), s64, false, temp);
+
+	// memcpy(lu.data, A.elements.data, A.elements.count * size_of(T));
+	// status = MKL.LAPACKE_sgetrf(
+	// 	MKL.LAPACK_ROW_MAJOR,
+	// 	A.rows,
+	// 	A.cols,
+	// 	lu.data,
+	// 	A.cols,
+	// 	ipiv.data
+	// );
+
+	// memcpy(x.data, b.data, b.count * size_of(T));
+	// status = MKL.LAPACKE_sgetrs(
+	// 	MKL.LAPACK_ROW_MAJOR,
+	// 	#char "N",
+	// 	b.count,
+	// 	1,
+	// 	lu.data,
+	// 	A.rows,
+	// 	ipiv.data,
+	// 	x.data,
+	// 	1
+	// );
+
+	// return x;
 }
 
 RBF :: (
@@ -244,6 +255,9 @@ operator + :: (a: V2($T), b: V2(T)) -> V2(T) {
 	return V2(T).make(a.x + b.x, a.y + b.y);
 }
 operator * :: (a: V2($T), b: T) -> V2(T) #symmetric {
+	return V2(T).make(a.x * b, a.y * b);
+}
+operator * :: (a: *V2($T), b: T) -> V2(T) #symmetric {
 	return V2(T).make(a.x * b, a.y * b);
 }
 operator / :: (a: V2($T), b: T) -> V2(T) {

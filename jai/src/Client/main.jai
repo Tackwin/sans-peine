@@ -1,4 +1,5 @@
 
+
 #scope_file
 ImGui :: #import "my_imgui";
 ImGui_GL :: #import "my_imgui/imgui_impl_gl";
@@ -10,6 +11,7 @@ Simulation :: #import "Simulation";
 Debug :: #import "xDebug";
 Tracy :: #import "Tracy";
 CLI :: #import "Command_Line";
+UI :: #import "UI";
 
 #import "Random";
 #import "File";
@@ -60,12 +62,15 @@ Ui :: struct {
 		step := false;
 		
 		averaging_selected: Simulation.Averaging = .Avg;
+		space_rendered: Simulation.Spaces = .Velocity;
 
 		eps : float32 = 0.00001;
 		n_probes := 300;
 
 		record_inputs := false;
 		clear_records := false; @trigger;
+
+
 
 		Sensor_Hertz :: 1000;
 
@@ -80,6 +85,7 @@ Ui :: struct {
 
 	Dyn_Proc :: struct {
 		input_timeline: (systems: *[..] Data.System_Reading) = null;
+		plot: (label: string, conf: UI.PlotConfig) -> UI.PlotStatus = null;
 	};
 	dyn_proc: Dyn_Proc;
 };
@@ -99,8 +105,15 @@ State :: struct {
 	dt: float64;
 	dt32: float32;
 
-	region: Simulation.Region;
+	magnetic_space: Simulation.Region;
+	velocity_space: Simulation.Region;
+	position_space: Simulation.Region;
+
+	velocity_swarm: [] Physics.V2f;
+	position_swarm: [] Physics.V2f;
+
 	beacons : [..] Data.Beacon;
+	trackers: [..] Data.Tracker;
 
 	pos_samples : [..] Physics.V2f;
 
@@ -233,14 +246,7 @@ app_update :: () {
 
 	if ui.interactive.default_beacon {
 		defer ui.interactive.default_beacon = false;
-
-		beacons.count = 0;
-
-		b: Data.Beacon;
-		b.pos = Physics.V2f.make(-0.2, -0.07);
-		array_add(*beacons, b);
-		b.pos = Physics.V2f.make(-0.2, +0.07);
-		array_add(*beacons, b);
+		init_beacon_trackers();
 	}
 
 	if ui.interactive.clear_inputs {
@@ -267,39 +273,63 @@ app_update :: () {
 pen_calibrating :: (input: Interface.Input) {
 	using context.state;
 
-	if input.kind == .Magnetometer {
-		min_sample_count := S64_MAX;
-		for * beacons {
-			using Physics;
-			B := Cast(input.mag.B, float64);
-			it.samples_count += 1;
+	min_sample_count := S64_MAX;
+	if input.kind == .Magnetometer for * beacons {
+		using Physics;
+		B := Cast(input.mag.B, float64);
+		it.samples_count += 1;
 
-			if it.samples_count == 1 {
-				it.mean = B;
-				it.s = .{0, 0, 0};
-				it.var = it.s;
-			} else {
-				it.mean_prev = it.mean;
-				it.s_prev    = it.s;
-				it.mean = it.mean_prev + (B - it.mean_prev) / cast(float64) it.samples_count;
-				it.s.x  = it.s.x     + (B.x - it.mean_prev.x) * cast(float64) (B.x - it.mean.x);
-				it.s.y  = it.s.y     + (B.y - it.mean_prev.y) * cast(float64) (B.y - it.mean.y);
-				it.s.z  = it.s.z     + (B.z - it.mean_prev.z) * cast(float64) (B.z - it.mean.z);
-				it.var  = it.s / (it.samples_count - 1.0);
-			}
-
-			it.std.x = sqrt(it.var.x);
-			it.std.y = sqrt(it.var.y);
-			it.std.z = sqrt(it.var.z);
-
-			min_sample_count = min(min_sample_count, it.samples_count);
+		if it.samples_count == 1 {
+			it.mean = B;
+			it.s = .{0, 0, 0};
+			it.var = it.s;
+		} else {
+			it.mean_prev = it.mean;
+			it.s_prev    = it.s;
+			it.mean = it.mean_prev + (B - it.mean_prev) / cast(float64) it.samples_count;
+			it.s.x  = it.s.x     + (B.x - it.mean_prev.x) * cast(float64) (B.x - it.mean.x);
+			it.s.y  = it.s.y     + (B.y - it.mean_prev.y) * cast(float64) (B.y - it.mean.y);
+			it.s.z  = it.s.z     + (B.z - it.mean_prev.z) * cast(float64) (B.z - it.mean.z);
+			it.var  = it.s / (it.samples_count - 1.0);
 		}
 
-		if min_sample_count > 100 ui.interactive.calibrating = false;
+		it.std.x = sqrt(it.var.x);
+		it.std.y = sqrt(it.var.y);
+		it.std.z = sqrt(it.var.z);
+
+		min_sample_count = min(min_sample_count, it.samples_count);
 	}
+
+	if input.kind == .Accelerometer {
+		it := *trackers[input.id];
+		using Physics;
+		g := Cast(input.acc.g, float64);
+		it.acc_samples_count += 1;
+
+		if it.acc_samples_count == 1 {
+			it.acc_mean = g;
+			it.acc_s = .{0, 0, 0};
+			it.acc_var = it.acc_s;
+		} else {
+			it.acc_mean_prev = it.acc_mean;
+			it.acc_s_prev    = it.acc_s;
+			it.acc_mean = it.acc_mean_prev + (g - it.acc_mean_prev) / cast(float64) it.acc_samples_count;
+			it.acc_s.x  = it.acc_s.x     + (g.x - it.acc_mean_prev.x) * (g.x - it.acc_mean.x);
+			it.acc_s.y  = it.acc_s.y     + (g.y - it.acc_mean_prev.y) * (g.y - it.acc_mean.y);
+			it.acc_s.z  = it.acc_s.z     + (g.z - it.acc_mean_prev.z) * (g.z - it.acc_mean.z);
+			it.acc_var  = it.acc_s / (it.acc_samples_count - 1.0);
+		}
+
+		it.acc_std.x = sqrt(it.acc_var.x);
+		it.acc_std.y = sqrt(it.acc_var.y);
+		it.acc_std.z = sqrt(it.acc_var.z);
+
+		min_sample_count = min(min_sample_count, it.acc_samples_count);
+	}
+
+	if min_sample_count != S64_MAX && min_sample_count > 100 ui.interactive.calibrating = false;
 }
 
-pen_update_mark := "pen_update";
 pen_update :: (input: Interface.Input) {
 	using context.state;
 	context_state := *context.state;
@@ -311,15 +341,30 @@ pen_update :: (input: Interface.Input) {
 	}
 	
 	last_magnetometers: [2] Data.Reading(Data.Magnetometer);
+	last_accelerometers: [2] Data.Reading(Data.Accelerometer);
+
 	for < past_inputs {
-		if !last_magnetometers[it.id].valid {
-			last_magnetometers[it.id].payload = it.mag;
-			last_magnetometers[it.id].valid = true;
-			last_magnetometers[it.id].interpolated_beg = it.time;
+		if it.kind == .Magnetometer {
+			if !last_magnetometers[it.id].valid {
+				last_magnetometers[it.id].payload = it.mag;
+				last_magnetometers[it.id].valid = true;
+				last_magnetometers[it.id].interpolated_beg = it.time;
+			}
 		}
 
-		if last_magnetometers[0].valid && last_magnetometers[1].valid break;
+		if it.kind == .Accelerometer {
+			if !last_accelerometers[it.id].valid {
+				last_accelerometers[it.id].payload = it.acc;
+				last_accelerometers[it.id].valid = true;
+				last_accelerometers[it.id].interpolated_beg = it.time;
+			}
+		}
+
+		if last_magnetometers[0].valid && last_magnetometers[1].valid
+		&& last_accelerometers[0].valid && last_accelerometers[1].valid
+			break;
 	}
+
 
 	if min_time > input.time min_time = input.time;
 
@@ -329,6 +374,10 @@ pen_update :: (input: Interface.Input) {
 		for * system.magnetometer_readings if last_magnetometers[it_index].valid {
 			it.interpolated_beg = last_magnetometers[it_index].interpolated_beg;
 			it.beg = last_magnetometers[it_index].payload;
+		}
+		for * system.accelerometer_readings if last_accelerometers[it_index].valid {
+			it.interpolated_beg = last_accelerometers[it_index].interpolated_beg;
+			it.beg = last_accelerometers[it_index].payload;
 		}
 
 		array_add(*systems, system);
@@ -348,38 +397,68 @@ pen_update :: (input: Interface.Input) {
 		`system_to_compute[`system_to_compute.count - 1] = idx;
 	}
 	for *system, it_index: systems {
-		mag := *system.magnetometer_readings[input.id];
+		if input.kind == .Magnetometer {
+			mag := *system.magnetometer_readings[input.id];
 
-		// If the incomming input is a measurement with the exact same time we update it
-		if system.time == input.time {
-			mag.payload = input.mag;
-			mag.valid = true;
-			mag.measured = true;
-			mag.interpolated_beg = input.time;
-			mag.interpolated_end = input.time;
-			mark_to_compute(it_index);
-			continue;
+			// If the incomming input is a measurement with the exact same time we update it
+			if system.time == input.time {
+				mag.payload = input.mag;
+				mag.valid = true;
+				mag.measured = true;
+				mag.interpolated_beg = input.time;
+				mag.interpolated_end = input.time;
+				mark_to_compute(it_index);
+			}
+
+			// If the incomming input is within the interpolated range we update and mark it too.
+			if (input.time < system.time && input.time > mag.interpolated_beg)
+			|| (input.time > system.time && input.time < mag.interpolated_end)
+			{
+				mag.payload = input.mag;
+				mag.valid = true;
+				mag.measured = false;
+				if input.time > system.time
+				{
+					mag.interpolated_end = min(mag.interpolated_end, input.time);
+					mag.end = input.mag;
+				}
+				if input.time < system.time
+				{
+					mag.interpolated_beg = max(mag.interpolated_beg, input.time);
+					mag.beg = input.mag;
+				}
+				mark_to_compute(it_index);
+			}
 		}
 
-		// If the incomming input is within the interpolated range we update and mark it too.
-		if (input.time < system.time && input.time > mag.interpolated_beg) ||
-		   (input.time > system.time && input.time < mag.interpolated_end)
-		{
-			mag.payload = input.mag;
-			mag.valid = true;
-			mag.measured = false;
-			if input.time > system.time
-			{
-				mag.interpolated_end = min(mag.interpolated_end, input.time);
-				mag.end = input.mag;
+		if input.kind == .Accelerometer {
+			acc := *system.accelerometer_readings[input.id];
+
+			if system.time == input.time {
+				acc.payload = input.acc;
+				acc.valid = true;
+				acc.measured = true;
+				acc.interpolated_beg = input.time;
+				acc.interpolated_end = input.time;
+				mark_to_compute(it_index);
 			}
-			if input.time < system.time
+
+			if (input.time < system.time && input.time > acc.interpolated_beg)
+			|| (input.time > system.time && input.time < acc.interpolated_end)
 			{
-				mag.interpolated_beg = min(mag.interpolated_beg, input.time);
-				mag.beg = input.mag;
+				acc.payload = input.acc;
+				acc.valid = true;
+				acc.measured = false;
+				if input.time > system.time {
+					acc.interpolated_end = min(acc.interpolated_end, input.time);
+					acc.end = input.acc;
+				}
+				if input.time < system.time {
+					acc.interpolated_beg = max(acc.interpolated_beg, input.time);
+					acc.beg = input.acc;
+				}
+				mark_to_compute(it_index);
 			}
-			mark_to_compute(it_index);
-			continue;
 		}
 	}
 
@@ -389,7 +468,7 @@ pen_update :: (input: Interface.Input) {
 		// if it isn't valid and the two magnetiometers reading didn't happen to flip to valid this
 		// time around, then we don't continue, we wait for both reading to be true.
 		if !it.valid
-			if (!it.magnetometer_readings[0].valid || !it.magnetometer_readings[0].valid) continue;
+			if !Data.system_is_complete(it) continue;
 			// Else we can mark it as valid
 			else it.valid = true;
 	}
@@ -409,6 +488,7 @@ update_system :: (system: *Data.System_Reading) {
 	defer Tracy.___tracy_emit_frame_mark_end(update_system_mark.data);
 	Tracy.ZONE("update_system");
 	Basis_N :: 5;
+
 	// pos := NewArray(Basis_N*Basis_N, Physics.V2f, false, temp);
 	// for x: 0..Basis_N-1 for y: 0..Basis_N-1 {
 	// 	p := Physics.V2f.make(
@@ -438,7 +518,7 @@ update_system :: (system: *Data.System_Reading) {
 	// 	if !found array_add(*pos_samples, at);
 	// }
 
-	for * region.matrix.elements { <<it = 1; }
+	for * magnetic_space.matrix.elements { <<it = 1; }
 	for b, b_idx: beacons {
 		if !(b.std.x > 0 && b.std.y > 0 && b.std.z > 0) continue;
 
@@ -451,29 +531,146 @@ update_system :: (system: *Data.System_Reading) {
 				mag = Data.interpolate(reading.beg, reading.end, t);
 			}
 		}
+		USE_AVX2 :: true;
 
-		Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *region);
-		// Simulation.estimate_to(
-		// 	ui.interactive.magnet_strength,
-		// 	b,
-		// 	last_mag,
-		// 	*region,
-		// 	pos_samples
-		// );
+		#if USE_AVX2 {
+			// Simulation.estimate_to_avx2(ui.interactive.magnet_strength, b, mag, *magnetic_space);
+		} else {
+			// Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *magnetic_space);
+		}
+	}
+
+	avg_tracker: Data.Tracker;
+	avg_tracker.acc_mean.x = +trackers[1].acc_mean.z;
+	avg_tracker.acc_mean.y = +trackers[1].acc_mean.y;
+	avg_tracker.acc_mean.z = -trackers[1].acc_mean.x;
+	avg_tracker.acc_std.x = +trackers[1].acc_std.z;
+	avg_tracker.acc_std.y = +trackers[1].acc_std.y;
+	avg_tracker.acc_std.z = -trackers[1].acc_std.x;
+
+	avg_tracker.acc_mean.x -= trackers[0].acc_mean.z;
+	avg_tracker.acc_mean.y -= trackers[0].acc_mean.y;
+	avg_tracker.acc_mean.z -= trackers[0].acc_mean.x;
+	avg_tracker.acc_std.x -= trackers[0].acc_std.z;
+	avg_tracker.acc_std.y -= trackers[0].acc_std.y;
+	avg_tracker.acc_std.z -= trackers[0].acc_std.x;
+
+	avg_tracker.acc_mean.x /= 2;
+	avg_tracker.acc_std.x  /= 2;
+	avg_tracker.acc_mean.y /= 2;
+	avg_tracker.acc_std.y  /= 2;
+	avg_tracker.acc_mean.z /= 2;
+	avg_tracker.acc_std.z  /= 2;
+
+	acc: Data.Accelerometer;
+	acc.g.x = +system.accelerometer_readings[1].payload.g.z;
+	acc.g.y = +system.accelerometer_readings[1].payload.g.y;
+	acc.g.z = -system.accelerometer_readings[1].payload.g.x;
+	acc.g.x -= system.accelerometer_readings[0].payload.g.z;
+	acc.g.y -= system.accelerometer_readings[0].payload.g.y;
+	acc.g.z -= system.accelerometer_readings[0].payload.g.x;
+
+	if system.time == max_time {
+		Simulation.estimate_to(
+			10.0 / ui.Sensor_Hertz, avg_tracker, acc, *velocity_swarm
+		);
+		Simulation.estimate_to(
+			10.0 / ui.Sensor_Hertz, velocity_swarm, *position_swarm
+		);
 	}
 
 	ma : float32 = -FLOAT32_MAX;
 	mi : float32 = +FLOAT32_MAX;
-	for region.matrix.elements ma = max(ma, it);
-	for region.matrix.elements mi = min(mi, it);
-	for * region.matrix.elements { <<it /= ifx ma == 0 then 1 else ma; };
+	for magnetic_space.matrix.elements ma = max(ma, it);
+	for magnetic_space.matrix.elements mi = min(mi, it);
+	if ma == 0 ma = 1;
+	for * magnetic_space.matrix.elements { <<it /= ma; };
 
 	if !ui.interactive.calibrating if ui.interactive.averaging_selected == {
 		case .Avg;
-			system.estimated_pos = Simulation.estimate_position_avg(region);
+			system.estimated_pos = Simulation.estimate_position_avg(magnetic_space);
 		case .Avg2;
-			system.estimated_pos = Simulation.estimate_position_avg2(region);
+			system.estimated_pos = Simulation.estimate_position_avg2(magnetic_space);
 	}
+}
+
+render_plot_mag :: () {
+	using context.state;
+	ys: [2][]float;
+	for * ys { <<it = NewArray(past_inputs.count, float, false, temp); }
+
+	idx1 := 0;
+	idx2 := 0;
+	for past_inputs if it.kind == .Magnetometer {
+		if it.id == 0 {
+			ys[0][idx1] = Physics.length(it.mag.B);
+			idx1 += 1;
+		}
+		if it.id == 1 {
+			ys[1][idx2] = Physics.length(it.mag.B);
+			idx2 += 1;
+		}
+	}
+	ys[0].count = idx1;
+	ys[1].count = idx2;
+
+	cys: [2]*float;
+	cys[0] = ys[0].data;
+	cys[1] = ys[1].data;
+	plot: UI.PlotConfig;
+	plot.values.count = S64_MAX;
+	for ys plot.values.count = min(plot.values.count, it.count);
+	plot.values.ys_list = cys.data;
+	plot.values.ys_count = cys.count;
+	plot.frame_size.x = ImGui.GetWindowSize().x * 0.95;
+	plot.frame_size.y = 100;
+
+	plot.scale.min = FLOAT32_MAX;
+	plot.scale.max = -FLOAT32_MAX;
+	for y: ys for y plot.scale.min = min(plot.scale.min, it - 0.000_000_1);
+	for y: ys for y plot.scale.max = max(plot.scale.max, it + 0.000_000_1);
+
+	ui.dyn_proc.plot("Magnet strength", plot);
+}
+
+render_plot_acc :: () {
+	using context.state;
+	
+	ys: [2][]float;
+	for * ys { <<it = NewArray(past_inputs.count, float, false, temp); }
+
+	idx1 := 0;
+	idx2 := 0;
+	for past_inputs if it.kind == .Accelerometer {
+		if it.id == 0 {
+			ys[0][idx1] = Physics.length(it.acc.g);
+			idx1 += 1;
+		}
+		if it.id == 1 {
+			ys[1][idx2] = Physics.length(it.acc.g);
+			idx2 += 1;
+		}
+	}
+	ys[0].count = idx1;
+	ys[1].count = idx2;
+
+	cys: [2]*float;
+	cys[0] = ys[0].data;
+	cys[1] = ys[1].data;
+	plot: UI.PlotConfig;
+	plot.values.count = S64_MAX;
+	for ys plot.values.count = min(plot.values.count, it.count);
+	plot.values.ys_list = cys.data;
+	plot.values.ys_count = cys.count;
+	plot.frame_size.x = ImGui.GetWindowSize().x * 0.95;
+	plot.frame_size.y = 100;
+
+	plot.scale.min = FLOAT32_MAX;
+	plot.scale.max = -FLOAT32_MAX;
+	for y: ys for y plot.scale.min = min(plot.scale.min, it - 0.000_000_1);
+	for y: ys for y plot.scale.max = max(plot.scale.max, it + 0.000_000_1);
+
+	ui.dyn_proc.plot("Acceleration strength", plot);
 }
 
 render_imgui :: () {
@@ -540,6 +737,7 @@ render_imgui :: () {
 	}
 	
 	if ImGui.CollapsingHeader("Info", .DefaultOpen) {
+		ImGui.Separator();
 		for beacons {
 			using Physics;
 			std := it.std * 1000 * 1000;
@@ -547,62 +745,28 @@ render_imgui :: () {
 			ImGui.Text(tprint("std  (µT): % % %\0", std.x, std.y, std.z).data);
 			ImGui.Text(tprint("mean (µT): % % %\0", mean.x, mean.y, mean.z).data);
 		}
+		ImGui.Separator();
+		for trackers {
+			using Physics;
+			std := it.acc_std * 1000;
+			mean := it.acc_mean * 1000;
+			ImGui.Text(tprint("std  (mg): % % %\0", std.x, std.y, std.z).data);
+			ImGui.Text(tprint("mean (mg): % % %\0", mean.x, mean.y, mean.z).data);
+		}
 		ImGui.Text(
 			tprint("Inputs: Pending % Past %\0", pending_inputs.count, past_inputs.count).data
 		);
 		ImGui.Text(tprint("Systems: %\0", systems.count).data);
 	}
-	ys: [2][]float;
-	for * ys { <<it = NewArray(past_inputs.count, float, false, temp); }
-
-	idx1 := 0;
-	idx2 := 0;
-	for past_inputs if it.kind == .Magnetometer {
-		if it.id == 0 {
-			ys[0][idx1] = Physics.length(it.mag.B);
-			idx1 += 1;
-		}
-		if it.id == 1 {
-			ys[1][idx2] = Physics.length(it.mag.B);
-			idx2 += 1;
-		}
-	}
-	ys[0].count = idx1;
-	ys[1].count = idx2;
-
-	cys: [2]*float;
-	cys[0] = ys[0].data;
-	cys[1] = ys[1].data;
-	plot: Render.PlotConfig;
-	plot.values.count = S64_MAX;
-	for ys plot.values.count = min(plot.values.count, it.count);
-	plot.values.ys_list = cys.data;
-	plot.values.ys_count = cys.count;
-	plot.frame_size.x = ImGui.GetWindowSize().x * 0.95;
-	plot.frame_size.y = 100;
-
-	plot.scale.min = FLOAT32_MAX;
-	plot.scale.max = -FLOAT32_MAX;
-	for y: ys for y plot.scale.min = min(plot.scale.min, it - 0.000_000_1);
-	for y: ys for y plot.scale.max = max(plot.scale.max, it + 0.000_000_1);
-
-	Render.Plot("Magnet strength", plot);
+	
+	render_plot_mag();
+	render_plot_acc();
 }
 
-render :: () {
+render_magnetic_space :: () {
 	using context.state;
-	Render.render_to_framebuffer();
-	glViewport(0, 0, 1920, 1080);
-	glClearColor(0, 0, 0, 1);
-	glClear(GL_COLOR_BUFFER_BIT);
-	defer {
-		w, h := get_window_size(ui.window);
-		glViewport(0, 0, xx w, xx h);
-		Render.render_to_screen();
-		Render.quad(.{0, 0}, .{2, 2}, Render.framebuffer_texture);
-	}
 
-	Render.matrix(region.matrix, region.space_size);
+	Render.matrix(magnetic_space.matrix, magnetic_space.space_size);
 	for beacons {
 		Render.circle(it.pos, 0.01);
 	}
@@ -641,32 +805,132 @@ render :: () {
 	);
 }
 
+render_velocity_space :: () {
+	using context.state;
+
+	using Physics;
+
+	for trackers {
+		Render.circle(it.offset, 0.003, .{0, 1, 0});
+	}
+
+	for velocity_swarm {
+		Render.circle(it, 0.0005, .{1, 1, 1});
+	}
+}
+
+render_position_space :: () {
+	using context.state;
+
+	using Physics;
+	for trackers {
+		Render.circle(it.offset, 0.003, .{0, 1, 0});
+	}
+
+	for position_swarm {
+		Render.circle(it, 0.0005, .{1, 1, 1});
+	}
+}
+
+render :: () {
+	using context.state;
+	Render.render_to_framebuffer();
+	glViewport(0, 0, 1920, 1080);
+	glClearColor(0, 0, 0, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+	defer {
+		w, h := get_window_size(ui.window);
+		glViewport(0, 0, xx w, xx h);
+		Render.render_to_screen();
+		Render.quad(.{0, 0}, .{2, 2}, Render.framebuffer_texture);
+	}
+
+	if ui.interactive.space_rendered == {
+		case .Magnetic; render_magnetic_space();
+		case .Velocity; render_velocity_space();
+		case .Position; render_position_space();
+	}
+}
+
 Args :: struct {
 	run: string;
 }
 
+init_beacon_trackers :: () {
+	context.state.beacons.count = 0;
+
+	b: Data.Beacon;
+	b.pos = Physics.V2f.make(-0.2, -0.07);
+	array_add(*context.state.beacons, b);
+	b.pos = Physics.V2f.make(-0.2, +0.07);
+	array_add(*context.state.beacons, b);
+
+	t: Data.Tracker;
+	t.offset = Physics.V2f.make(-0.01, 0);
+	array_add(*context.state.trackers, t);
+	t.offset = Physics.V2f.make(+0.01, 0);
+	array_add(*context.state.trackers, t);
+}
+
+make_spaces :: () {
+	using context.state;
+
+	magnetic_space.space_origin = .{0, 0};
+	magnetic_space.space_size = .{0.3, 0.3};
+	magnetic_space.matrix.rows = 50;
+	magnetic_space.matrix.cols = 50;
+	magnetic_space.matrix.elements = NewArray(
+		magnetic_space.matrix.rows * magnetic_space.matrix.cols, float32
+	);
+	for * magnetic_space.matrix.elements { <<it = (random_get() % 255) / 255.0; }
+
+	velocity_space.space_origin = .{0, 0};
+	velocity_space.space_size = .{0.2, 0.2};
+	velocity_space.matrix = Physics.Matrixf.make(51, 51, false);
+
+	<<Physics.at(
+		velocity_space.matrix,
+		velocity_space.matrix.rows / 2,
+		velocity_space.matrix.cols / 2
+	) = 1;
+
+	position_space.space_origin = .{0, 0};
+	position_space.space_size = .{0.2, 0.2};
+	position_space.matrix = Physics.Matrixf.make(51, 51, false);
+
+	<<Physics.at(
+		position_space.matrix,
+		position_space.matrix.rows / 2,
+		position_space.matrix.cols / 2
+	) = 1;
+
+	velocity_swarm = NewArray(1000, Physics.V2f);
+	position_swarm = NewArray(1000, Physics.V2f);
+}
+
+free_spaces :: () {
+	using context.state;
+
+	free(magnetic_space.matrix.elements.data);
+	free(velocity_space.matrix.elements.data);
+	free(position_space.matrix.elements.data);
+
+	free(velocity_swarm.data);
+	free(position_swarm.data);
+}
 
 main :: () {
 	using context.state;
 
 	Tracy.set_thread_name("Main");
 	success, args, is_set := CLI.parse_arguments(Args);
-	region.space_origin = .{0, 0};
-	region.space_size = .{0.3, 0.3};
-	region.matrix.rows = 150;
-	region.matrix.cols = 150;
-	region.matrix.elements = NewArray(region.matrix.rows * region.matrix.cols, float32);
-	defer free(region.matrix.elements.data);
-	
-	print("%\n", args);
-	if is_set.run {
-		beacons.count = 0;
 
-		b: Data.Beacon;
-		b.pos = Physics.V2f.make(-0.2, -0.07);
-		array_add(*beacons, b);
-		b.pos = Physics.V2f.make(-0.2, +0.07);
-		array_add(*beacons, b);
+	make_spaces();
+	defer free_spaces();
+
+
+	if is_set.run {
+		init_beacon_trackers();
 
 		file, openend := read_entire_file("records/record.dat");
 		inputs_read: [] Interface.Input;
@@ -705,9 +969,6 @@ main :: () {
 	current_time: float64;
 	last_time: float64;
 
-
-	for * region.matrix.elements { <<it = (random_get() % 255) / 255.0; }
- 
 	current_driver = load_driver("USB.dll");
 	current_driver.memory = alloc(Interface.size(current_driver));
 	defer free(current_driver.memory);
@@ -892,6 +1153,7 @@ DONE;
 
 		ret: Ui.Dyn_Proc;
 		ret.input_timeline = xx GetProcAddress(ui_dll, "input_timeline");
+		ret.plot = xx GetProcAddress(ui_dll, "plot");
 		return ret;
 	}
 }

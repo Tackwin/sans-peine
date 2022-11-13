@@ -3,6 +3,7 @@
 #import "Math";
 Tracy :: #import "Tracy";
 #import "Basic";
+#import "Random";
 
 #scope_export
 
@@ -48,23 +49,16 @@ identity :: float32.[
 	0, 0, 0, 0, 0, 0, 0, 1
 ] #align 32;
 
-magnetic_fields_avx2 :: (ms: V3f_vec, r: V3f_vec, Bs: *V3f_vec) {
+magnetic_fields_avx2 :: (pr: *float32, pm: *float, pB: *float) {
 	C :: cast(float32) (3 * u0 / (4 * PI));
 
-	pr := r.xs.data;
-	pm := ms.xs.data;
-	pB := Bs.xs.data;
 	pidx := cast(u64) indices.data;
 	pidentity := cast(u64) identity.data;
-
-	// print("% % %\n", formatInt(cast(int) pr, 16), formatInt(cast(int) pm, 16), formatInt(cast(int) pB, 16));
 
 	c := C;
 	pc := *c;
 
 	#asm AVX, AVX2, FMA {
-		broadcastss Cs:, [pc];
-
 		movups.y rx:, [pr + 0x00];
 		movups.y ry:, [pr + 0x20];
 		movups.y rz:, [pr + 0x40];
@@ -72,7 +66,6 @@ magnetic_fields_avx2 :: (ms: V3f_vec, r: V3f_vec, Bs: *V3f_vec) {
 		movups.y mx:, [pm + 0x00];
 		movups.y my:, [pm + 0x20];
 		movups.y mz:, [pm + 0x40];
-
 		pxor.y Bx:, Bx, Bx;
 		pxor.y By:, By, By;
 		pxor.y Bz:, Bz, Bz;
@@ -89,13 +82,10 @@ magnetic_fields_avx2 :: (ms: V3f_vec, r: V3f_vec, Bs: *V3f_vec) {
 	it := 0;
 	while it < 64 {
 		#asm AVX, AVX2, FMA {
-			movups.y id:, [pidentity + it * 4];
-
 			movdqu.y rr:, [pidx + it * 4];
 			permps.y lr:, rr, lengths;
 
-			pxor.y b:, b, b;
-			fmadd231ps.y b, mx, rx;
+			mulps.y b:, mx, rx;
 			fmadd231ps.y b, my, ry;
 			fmadd231ps.y b, mz, rz;
 			mulps.y b, b, lr;
@@ -104,130 +94,37 @@ magnetic_fields_avx2 :: (ms: V3f_vec, r: V3f_vec, Bs: *V3f_vec) {
 			mulps.y rr, rx, lr;
 			mulps.y rr, b, rr;
 			subps.y rr, rr, mx;
-			fmadd231ps.y Bx, rr, id;
+			fmadd231ps.y Bx, rr, [pidentity + it * 4];
 
 			mulps.y rr, ry, lr;
 			mulps.y rr, b, rr;
 			subps.y rr, rr, my;
-			fmadd231ps.y By, rr, id;
+			fmadd231ps.y By, rr, [pidentity + it * 4];
 
 			mulps.y rr, rz, lr;
 			mulps.y rr, b, rr;
 			subps.y rr, rr, mz;
-			fmadd231ps.y Bz, rr, id;
+			fmadd231ps.y Bz, rr, [pidentity + it * 4];
 
-			mulps.y rr, lr, Cs;
+			mulps.y rr, lr, lr;
 			mulps.y rr, lr, rr;
-			mulps.y rr, lr, rr;
-			fmadd231ps.y f, rr, id;
+			fmadd231ps.y f, rr, [pidentity + it * 4];
 
 			add it, 8;
 		}
 	}
 
 	#asm AVX, AVX2, FMA {
+		broadcastss lengths, [pc];
+		mulps.y f, f, lengths;
 		mulps.y Bx, Bx, f;
 		mulps.y By, By, f;
 		mulps.y Bz, Bz, f;
-
-		movups.y [pB + 00], Bx;
-		movups.y [pB + 32], By;
-		movups.y [pB + 64], Bz;
+		movups.y [pB + 0x00], Bx;
+		movups.y [pB + 0x20], By;
+		movups.y [pB + 0x40], Bz;
 		zeroupper;
 	}
-
-
-	// for 0..7 {
-
-	// 	// J'essaie de remplacer cette ligne par une passe en ASM
-	// 	// lr := r.xs[it] * r.xs[it] + r.ys[it] * r.ys[it] + r.zs[it] * r.zs[it];
-	// 	// lr = 1.0 / sqrt(lr);
-
-	// 	// ça peut être remplacé par ça grâce au block ASM juste avant, mais j'ai un slowdown de 2x
-	// 	lr := l[it];
-
-
-	// 	rr := inline V3f.make(r.xs[it] * lr, r.ys[it] * lr, r.zs[it] * lr);
-	// 	b := ms.xs[it] * r.xs[it] + ms.ys[it] * r.ys[it] + ms.zs[it] * r.zs[it];
-	// 	b *= lr;
-	// 	Bs.xs[it] = b * rr.x;
-	// 	Bs.ys[it] = b * rr.y;
-	// 	Bs.zs[it] = b * rr.z;
-	// 	Bs.xs[it] -= ms.xs[it];
-	// 	Bs.ys[it] -= ms.ys[it];
-	// 	Bs.zs[it] -= ms.zs[it];
-	// 	Bs.xs[it] *= lr * lr * lr;
-	// 	Bs.ys[it] *= lr * lr * lr;
-	// 	Bs.zs[it] *= lr * lr * lr;
-	// 	Bs.xs[it] *= C;
-	// 	Bs.ys[it] *= C;
-	// 	Bs.zs[it] *= C;
-	// }
-
-
-	// #asm AVX, AVX2, FMA {
-	// 	movups.y rx:, [pr];
-	// 	movups.y ry:, [pr + 32];
-	// 	movups.y rz:, [pr + 64];
-		
-	// 	mulps.y lengths:, rx, rx;
-	// 	fmadd231ps.y lengths, ry, ry;
-	// 	fmadd231ps.y lengths, rz, rz;
-	// 	sqrtps.y lengths, lengths;
-	// 	rcpps.y lengths, lengths;
-
-	// 	movups.y [plr], lengths;
-	// 	mulps.y lengths3:, lengths, lengths;
-	// 	mulps.y lengths3, lengths3, lengths;
-	// 	movups.y [pl3], lengths3;
-	// }
-
-	// for 0..7 {
-	// 	lr := l[it];
-	// 	rr := inline V3f.make(r.xs[it] * lr, r.ys[it] * lr, r.zs[it] * lr);
-	// 	b := ms.xs[it] * r.xs[it] + ms.ys[it] * r.ys[it] + ms.zs[it] * r.zs[it];
-	// 	b *= lr;
-	// 	Bs.xs[it] = b * rr.x;
-	// 	Bs.ys[it] = b * rr.y;
-	// 	Bs.zs[it] = b * rr.z;
-	// 	factor[it] = l3[it] * C;
-	// }
-
-	// #asm AVX, AVX2, FMA {
-	// 	movups.y rx, [pB + 0x00];
-	// 	movups.y ry, [pB + 0x20];
-	// 	movups.y rz, [pB + 0x40];
-
-	// 	movups.y mx:, [pm + 0x00];
-	// 	movups.y my:, [pm + 0x20];
-	// 	movups.y mz:, [pm + 0x40];
-
-	// 	movups.y factors:, [pfactor];
-
-	// 	subps.y rx, rx, mx;
-	// 	subps.y ry, ry, my;
-	// 	subps.y rz, rz, mz;
-
-	// 	mulps.y rx, rx, factors;
-	// 	mulps.y ry, ry, factors;
-	// 	mulps.y rz, rz, factors;
-
-	// 	movups.y [pB + 00], rx;
-	// 	movups.y [pB + 32], ry;
-	// 	movups.y [pB + 64], rz;
-
-	// 	zeroupper;
-	// }
-
-	// #asm AVX, AVX2, FMA {
-	// 	mulps Bx, Bx, f;
-	// 	mulps By, By, f;
-	// 	mulps Bz, Bz, f;
-
-	// 	movups.y [pB + 00], Bx;
-	// 	movups.y [pB + 32], By;
-	// 	movups.y [pB + 64], Bz;
-	// }
 }
 
 magnetic_field_strength :: (m: $T, r: T) -> T {
@@ -288,4 +185,13 @@ pdfv3 :: (law: Normal($T), x: T) -> T.T {
 	// normalize the matrix, but we do it anyway.
 	p := ifx e < -10 then 0 else C * exp(e);
 	return p;
+}
+
+sample :: (law: Normal($T)) -> T {
+	u := random_get_zero_to_one();
+	v := random_get_zero_to_one();
+
+	n := sqrt(-2 * log(u) / log(e)) * cos(2 * PI * v);
+
+	return cast(T) (law.mean + n * law.std);
 }

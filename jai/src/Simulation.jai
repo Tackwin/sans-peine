@@ -2,7 +2,7 @@
 
 #import "Basic";
 #import "Math";
-
+#import "Random";
 
 Tracy :: #import "Tracy";
 
@@ -29,11 +29,125 @@ transform :: (using region: Region, xi: int, yi: int) -> V2f {
 	);
 }
 
+estimate_to :: (dt: float64, tracker: Tracker, acc: Accelerometer, swarm: *[] V2f) {
+	Tracy.ZONE("Estimate acc");
+
+	lawv3 := Normalv3f.make(Cast(acc.g, float32), Cast(tracker.acc_std, float32));
+
+	for * <<swarm {
+		sx := sample(Normalf.make(lawv3.mean.x, lawv3.std.x));
+		sy := sample(Normalf.make(lawv3.mean.y, lawv3.std.y));
+
+		it.x += cast(float32) (dt * sx);
+		it.y += cast(float32) (dt * sy);
+	}
+}
+
+estimate_to :: (dt: float64, velocity_swarm: [] V2f, position_swarm: *[] V2f) {
+	Tracy.ZONE("Estimate pos");
+
+	vn := velocity_swarm.count;
+	for * <<position_swarm {
+		i := cast(int) (random_get_zero_to_one_open() * vn);
+		it.x += cast(float32) (dt * velocity_swarm[i].x);
+		it.y += cast(float32) (dt * velocity_swarm[i].y);
+	}
+}
+
+estimate_to_avx2 :: (magnet_strength: float64, beacon: Beacon, mag: Magnetometer, region: *Region) {
+	Tracy.ZONE("Estimate AVX2 mag");
+
+	RINGS :: 2;
+	STARS :: 4;
+	probes :: #run -> [RINGS * STARS / 8] V3f_vec {
+		radius : float32 : 0.005;
+		height : float32 : 0.06;
+		h_off  : float32 : 0.015;
+		probe_aos : [RINGS * STARS] V3f;
+
+		for r: 0..RINGS-1 for s: 0..STARS-1 {
+			p: V3f;
+			p.x = cast(float32) (radius * cos(2 * PI * s / cast(float32) STARS));
+			p.y = cast(float32) (radius * sin(2 * PI * s / cast(float32) STARS));
+			p.z = cast(float32) (h_off + r * height / (RINGS - 1.0));
+			probe_aos[s + r * STARS] = p;
+		}
+
+		probe_soa : [RINGS * STARS / 8] V3f_vec;
+		for probe_aos {
+			probe_soa[it_index / 8].xs[it_index % 8] = it.x;
+			probe_soa[it_index / 8].ys[it_index % 8] = it.y;
+			probe_soa[it_index / 8].zs[it_index % 8] = it.z;
+		}
+
+		return probe_soa;
+	};
+
+	ms : V3f_vec;
+	rs : V3f_vec;
+	Bs : V3f_vec;
+	for 0..7 {
+		ms.xs[it] = 0;
+		ms.ys[it] = 0;
+		ms.zs[it] = cast(float32) (magnet_strength / (probes.count * 8));
+	}
+
+	pm := ms.xs.data;
+	pB := Bs.xs.data;
+
+
+	lawv3 := Normalv3f.make(mag.B - Cast(beacon.mean, float32), Cast(beacon.std, float32));
+
+	beg_y := -0.5 * region.space_size.y + region.space_origin.y - beacon.pos.y;
+	end_y := +0.5 * region.space_size.y + region.space_origin.y - beacon.pos.y;
+	ste_y := (end_y - beg_y) / (region.matrix.rows - 1.0);
+
+	beg_x := -0.5 * region.space_size.x + region.space_origin.x - beacon.pos.x;
+	end_x := +0.5 * region.space_size.x + region.space_origin.x - beacon.pos.x;
+	ste_x := (end_x - beg_x) / (region.matrix.rows - 1.0);
+
+	origin := V3f_vec.fill(beg_x, beg_y, 0);
+	for yi: 0..region.matrix.rows-1 {
+		for 0..7 origin.xs[it] = beg_x;
+
+		for xi: 0..region.matrix.cols-1 {
+			b := V3f.make(0, 0, 0);
+
+			for probe_idx: 0..probes.count-1 {
+				porgins := origin.xs.data;
+				pprobes := (cast(s64) probes.data) + probe_idx * 3 * 8 * size_of(float32);
+
+				r: V3f_vec = ---;
+				pr := r.xs.data;
+				for 0..7 {
+					r.xs[it] = origin.xs[it] + probes[probe_idx].xs[it];
+					r.ys[it] = origin.ys[it] + probes[probe_idx].ys[it];
+					r.zs[it] = origin.zs[it] + probes[probe_idx].zs[it];
+				}
+
+				inline magnetic_fields_avx2(pr, pm, pB);
+
+				for 0..7 {
+					b.x += Bs.xs[it];
+					b.y += Bs.ys[it];
+					b.z += Bs.zs[it];
+				}
+			}
+
+			p := pdfv3(lawv3, b);
+			<<at(region.matrix, xi, yi) *= cast(float32) p;
+
+			for 0..7 origin.xs[it] += ste_x;
+		}
+
+		for 0..7 origin.ys[it] += ste_y;
+	}
+}
+
 estimate_to :: (magnet_strength: float64, beacon: Beacon, mag: Magnetometer, region: *Region) {
 	Tracy.ZONE("Estimate");
 	m := V3d.make(0, 0, 1) * magnet_strength;
 
-	USE_AVX2 :: true;
 	RINGS :: 3;
 	STARS :: 8;
 	probes :: #run -> [RINGS * STARS] V3f {
@@ -53,15 +167,6 @@ estimate_to :: (magnet_strength: float64, beacon: Beacon, mag: Magnetometer, reg
 		return ps;
 	};
 
-	ms : V3f_vec;
-	rs : V3f_vec;
-	Bs : V3f_vec;
-	for 0..7 {
-		ms.xs[it] = 0;
-		ms.ys[it] = 0;
-		ms.zs[it] = 1.0 / probes.count;
-	}
-
 	lawv3 := Normalv3f.make(mag.B - Cast(beacon.mean, float32), Cast(beacon.std, float32));
 	for yi: 0..region.matrix.rows-1 for xi: 0..region.matrix.cols-1 {
 		r2d := transform(region, xi, yi);
@@ -72,26 +177,7 @@ estimate_to :: (magnet_strength: float64, beacon: Beacon, mag: Magnetometer, reg
 		b := V3f.{};
 
 		count := 0;
-		#if USE_AVX2 for 0..probes.count/8-1 {
-			local_p := 1;
-
-			for off: 0..7 {
-				it := probes[count + off];
-
-				rs.xs[off] = r.x + it.x;
-				rs.ys[off] = r.y + it.y;
-				rs.zs[off] = r.z + it.z;
-			}
-			inline magnetic_fields_avx2(ms, rs, *Bs);
-
-			for 0..7 {
-				b.x += Bs.xs[it];
-				b.y += Bs.ys[it];
-				b.z += Bs.zs[it];
-			}
-
-			count += 8;
-		} else for count..probes.count-1 {
+		for count..probes.count-1 {
 			mm := m / probes.count;
 			rr := r + probes[it];
 			rrr := Cast(rr, float64);
@@ -167,6 +253,13 @@ estimate_to :: (
 		regular := RBF(pos_samples, samples, r => 1.0 / (r * r + context.state.ui.interactive.eps), region, temp);
 		for regular.elements region.matrix.elements[it_index] *= it;
 	}
+}
+
+Spaces :: enum {
+	Magnetic :: 0;
+	Velocity :: 1;
+	Position :: 2;
+	Fused :: 3;
 }
 
 Averaging :: enum {

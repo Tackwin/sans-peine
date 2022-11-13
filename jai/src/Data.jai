@@ -31,6 +31,22 @@ Beacon :: struct {
 	samples_count := 0;
 }
 
+Tracker :: struct {
+	offset: V2f;
+	speed: V2f;
+
+	acc: V3f;
+	gyr: V3f;
+
+	acc_mean_prev: V3d;
+	acc_mean: V3d;
+	acc_s_prev: V3d;
+	acc_s: V3d;
+	acc_var: V3d;
+	acc_std: V3d;
+	acc_samples_count := 0;
+}
+
 Path :: struct {
 	points : [..] V2f;
 }
@@ -47,14 +63,19 @@ Reading :: struct(T: Type) {
 
 System_Reading :: struct {
 	magnetometer_readings: [2] Reading(Magnetometer);
+	accelerometer_readings: [2] Reading(Accelerometer);
+	gyroscope_readings: [2] Reading(Gyroscope);
+
 	time := 0;
 	valid := false;
 
 	estimated_pos: V2f;
+
 }
 
 system_is_complete :: (using this: System_Reading) -> bool {
 	for magnetometer_readings if !it.valid return false;
+	for accelerometer_readings if !it.valid return false;
 	return true;
 }
 
