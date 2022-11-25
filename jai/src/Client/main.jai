@@ -26,6 +26,8 @@ UI :: #import "UI";
 
 #scope_export
 
+Sensor_Hertz :: 200;
+Sensor_Dt    :: 1.0 / Sensor_Hertz;
 Ui :: struct {
 	imgui: ImGui_GL.UI_State;
 	window: Window_Type;
@@ -69,11 +71,6 @@ Ui :: struct {
 
 		record_inputs := false;
 		clear_records := false; @trigger;
-
-
-
-		Sensor_Hertz :: 1000;
-
 	};
 	using interactive;
 
@@ -109,8 +106,8 @@ State :: struct {
 	velocity_space: Simulation.Region;
 	position_space: Simulation.Region;
 
-	velocity_swarm: [] Physics.V2f;
-	position_swarm: [] Physics.V2f;
+	velocity_swarm: [..] Physics.V2f;
+	position_swarm: [..] Physics.V2f;
 
 	beacons : [..] Data.Beacon;
 	trackers: [..] Data.Tracker;
@@ -200,7 +197,6 @@ pen_input :: () {
 				handle_input(inputs_read[ui.replay_input_cursor]);
 			ui.replay_input_cursor += 1;
 		}
-		
 	}
 	else {
 		max_it := 1;
@@ -306,25 +302,29 @@ pen_calibrating :: (input: Interface.Input) {
 		g := Cast(input.acc.g, float64);
 		it.acc_samples_count += 1;
 
+		FIRST_BAD_SAMPLES :: 10;
+
 		if it.acc_samples_count == 1 {
 			it.acc_mean = g;
 			it.acc_s = .{0, 0, 0};
 			it.acc_var = it.acc_s;
-		} else {
+		} else if it.acc_samples_count > FIRST_BAD_SAMPLES {
 			it.acc_mean_prev = it.acc_mean;
 			it.acc_s_prev    = it.acc_s;
-			it.acc_mean = it.acc_mean_prev + (g - it.acc_mean_prev) / cast(float64) it.acc_samples_count;
+
+			n := it.acc_samples_count - FIRST_BAD_SAMPLES;
+			it.acc_mean = it.acc_mean_prev + (g - it.acc_mean_prev) / (n + 0.0);
 			it.acc_s.x  = it.acc_s.x     + (g.x - it.acc_mean_prev.x) * (g.x - it.acc_mean.x);
 			it.acc_s.y  = it.acc_s.y     + (g.y - it.acc_mean_prev.y) * (g.y - it.acc_mean.y);
 			it.acc_s.z  = it.acc_s.z     + (g.z - it.acc_mean_prev.z) * (g.z - it.acc_mean.z);
-			it.acc_var  = it.acc_s / (it.acc_samples_count - 1.0);
+			it.acc_var  = it.acc_s / (n - 1.0);
 		}
 
 		it.acc_std.x = sqrt(it.acc_var.x);
 		it.acc_std.y = sqrt(it.acc_var.y);
 		it.acc_std.z = sqrt(it.acc_var.z);
 
-		min_sample_count = min(min_sample_count, it.acc_samples_count);
+		min_sample_count = min(min_sample_count, max(it.acc_samples_count, FIRST_BAD_SAMPLES) - FIRST_BAD_SAMPLES);
 	}
 
 	if min_sample_count != S64_MAX && min_sample_count > 100 ui.interactive.calibrating = false;
@@ -370,7 +370,7 @@ pen_update :: (input: Interface.Input) {
 
 	add_system :: (it: int) #expand {
 		system: Data.System_Reading;
-		system.time = (it * 1000) / ui.Sensor_Hertz + min_time;
+		system.time = it + min_time;
 		for * system.magnetometer_readings if last_magnetometers[it_index].valid {
 			it.interpolated_beg = last_magnetometers[it_index].interpolated_beg;
 			it.beg = last_magnetometers[it_index].payload;
@@ -387,7 +387,7 @@ pen_update :: (input: Interface.Input) {
 		max_time = input.time;
 		t := max_time - min_time;
 
-		for systems.count..cast(int)ceil(cast(float32) t * ui.Sensor_Hertz / 1000.0) add_system(it);
+		for systems.count..cast(int)ceil(cast(float32) t * Sensor_Hertz / 1000.0) add_system(it);
 	}
 
 	system_to_compute := NewArray(systems.count, s64, false, temp);
@@ -481,8 +481,74 @@ pen_update :: (input: Interface.Input) {
 	}
 }
 
+compute_velocity_position_from_cache_at :: (
+	velocity_swarm: *[..] Physics.V2f, position_swarm: *[..] Physics.V2f, at: int
+) {
+	using, except(velocity_swarm, position_swarm) context.state;
+	if systems.count == 0 return;
+
+	last_system := -1;
+	for < at..0 if !systems[it].dirty {
+		last_system = it;
+		break;
+	}
+	if last_system >= systems.count return;
+	if last_system < 0 {
+		array_reserve(*systems[0].velocity_swarm, 20);
+		array_reserve(*systems[0].position_swarm, 20);
+
+		systems[0].velocity_swarm.count = 20;
+		systems[0].position_swarm.count = 20;
+
+		for * systems[0].velocity_swarm { <<it = .{0, 0}; }
+		for * systems[0].position_swarm { <<it = .{0, 0}; }
+
+		last_system = 0;
+	}
+
+	print("Computing %\n", at - last_system);
+
+	array_copy(velocity_swarm, systems[last_system].velocity_swarm);
+	array_copy(position_swarm, systems[last_system].position_swarm);
+
+	for last_system..systems.count-1 {
+
+		Simulation.estimate_to(
+			Sensor_Dt, trackers[0], systems[it].accelerometer_readings[0].payload, velocity_swarm
+		);
+		Simulation.estimate_to(Sensor_Dt, <<velocity_swarm, position_swarm);
+	}
+}
+
+refresh_cache :: () {
+	using context.state;
+	
+	CACHE_INTERVAL :: 10;
+
+	time_since_last_cache := 0;
+	for * systems if it.valid {
+		if it.dirty {
+			time_since_last_cache += 1;
+		} else {
+			time_since_last_cache = 0;
+		}
+
+		if time_since_last_cache > CACHE_INTERVAL {
+			v: [..] Physics.V2f;
+			p: [..] Physics.V2f;
+			compute_velocity_position_from_cache_at(*v, *p, it_index);
+			it.velocity_swarm = v;
+			it.position_swarm = p;
+			it.dirty = false;
+			time_since_last_cache = 0;
+		}
+	}
+}
+
 update_system_mark := "update_system";
 update_system :: (system: *Data.System_Reading) {
+	if system.computed_time > 0 return;
+	defer system.computed_time += 1;
 	using context.state;
 	Tracy.___tracy_emit_frame_mark_start(update_system_mark.data);
 	defer Tracy.___tracy_emit_frame_mark_end(update_system_mark.data);
@@ -540,44 +606,47 @@ update_system :: (system: *Data.System_Reading) {
 		}
 	}
 
-	avg_tracker: Data.Tracker;
-	avg_tracker.acc_mean.x = +trackers[1].acc_mean.z;
-	avg_tracker.acc_mean.y = +trackers[1].acc_mean.y;
-	avg_tracker.acc_mean.z = -trackers[1].acc_mean.x;
-	avg_tracker.acc_std.x = +trackers[1].acc_std.z;
-	avg_tracker.acc_std.y = +trackers[1].acc_std.y;
-	avg_tracker.acc_std.z = -trackers[1].acc_std.x;
+	// avg_tracker: Data.Tracker;
+	// avg_tracker.acc_mean.x = +trackers[1].acc_mean.z;
+	// avg_tracker.acc_mean.y = +trackers[1].acc_mean.y;
+	// avg_tracker.acc_mean.z = -trackers[1].acc_mean.x;
+	// avg_tracker.acc_std.x = trackers[1].acc_std.z;
+	// avg_tracker.acc_std.y = trackers[1].acc_std.y;
+	// avg_tracker.acc_std.z = trackers[1].acc_std.x;
 
-	avg_tracker.acc_mean.x -= trackers[0].acc_mean.z;
-	avg_tracker.acc_mean.y -= trackers[0].acc_mean.y;
-	avg_tracker.acc_mean.z -= trackers[0].acc_mean.x;
-	avg_tracker.acc_std.x -= trackers[0].acc_std.z;
-	avg_tracker.acc_std.y -= trackers[0].acc_std.y;
-	avg_tracker.acc_std.z -= trackers[0].acc_std.x;
+	// avg_tracker.acc_mean.x -= trackers[0].acc_mean.z;
+	// avg_tracker.acc_mean.y -= trackers[0].acc_mean.y;
+	// avg_tracker.acc_mean.z -= trackers[0].acc_mean.x;
+	// avg_tracker.acc_std.x += trackers[0].acc_std.z;
+	// avg_tracker.acc_std.y += trackers[0].acc_std.y;
+	// avg_tracker.acc_std.z += trackers[0].acc_std.x;
 
-	avg_tracker.acc_mean.x /= 2;
-	avg_tracker.acc_std.x  /= 2;
-	avg_tracker.acc_mean.y /= 2;
-	avg_tracker.acc_std.y  /= 2;
-	avg_tracker.acc_mean.z /= 2;
-	avg_tracker.acc_std.z  /= 2;
+	// avg_tracker.acc_mean.x /= 2;
+	// avg_tracker.acc_std.x  /= 2;
+	// avg_tracker.acc_mean.y /= 2;
+	// avg_tracker.acc_std.y  /= 2;
+	// avg_tracker.acc_mean.z /= 2;
+	// avg_tracker.acc_std.z  /= 2;
 
-	acc: Data.Accelerometer;
-	acc.g.x = +system.accelerometer_readings[1].payload.g.z;
-	acc.g.y = +system.accelerometer_readings[1].payload.g.y;
-	acc.g.z = -system.accelerometer_readings[1].payload.g.x;
-	acc.g.x -= system.accelerometer_readings[0].payload.g.z;
-	acc.g.y -= system.accelerometer_readings[0].payload.g.y;
-	acc.g.z -= system.accelerometer_readings[0].payload.g.x;
+	// acc: Data.Accelerometer;
+	// acc.g.x = +system.accelerometer_readings[1].payload.g.z;
+	// acc.g.y = +system.accelerometer_readings[1].payload.g.y;
+	// acc.g.z = -system.accelerometer_readings[1].payload.g.x;
+	// acc.g.x -= system.accelerometer_readings[0].payload.g.z;
+	// acc.g.y -= system.accelerometer_readings[0].payload.g.y;
+	// acc.g.z -= system.accelerometer_readings[0].payload.g.x;
 
-	if system.time == max_time {
-		Simulation.estimate_to(
-			10.0 / ui.Sensor_Hertz, avg_tracker, acc, *velocity_swarm
-		);
-		Simulation.estimate_to(
-			10.0 / ui.Sensor_Hertz, velocity_swarm, *position_swarm
-		);
-	}
+
+	// if system.time == max_time {
+	// 	dt := 1.0 / ui.Sensor_Hertz;
+
+	// 	for t: trackers Simulation.estimate_to(
+	// 		dt / trackers.count, t, system.accelerometer_readings[it_index].payload, *velocity_swarm
+	// 	);
+	// 	Simulation.estimate_to(
+	// 		dt, velocity_swarm, *position_swarm
+	// 	);
+	// }
 
 	ma : float32 = -FLOAT32_MAX;
 	mi : float32 = +FLOAT32_MAX;
@@ -592,6 +661,8 @@ update_system :: (system: *Data.System_Reading) {
 		case .Avg2;
 			system.estimated_pos = Simulation.estimate_position_avg2(magnetic_space);
 	}
+	
+	refresh_cache();
 }
 
 render_plot_mag :: () {
@@ -810,6 +881,18 @@ render_velocity_space :: () {
 
 	using Physics;
 
+	for * velocity_swarm { it.x = 0; it.y = 0; }
+	for * position_swarm { it.x = 0; it.y = 0; }
+
+	for systems {
+		Simulation.estimate_to(
+			Sensor_Dt, trackers[0], it.accelerometer_readings[0].payload, *velocity_swarm
+		);
+		Simulation.estimate_to(
+			Sensor_Dt, velocity_swarm, *position_swarm
+		);
+	}
+
 	for trackers {
 		Render.circle(it.offset, 0.003, .{0, 1, 0});
 	}
@@ -821,6 +904,18 @@ render_velocity_space :: () {
 
 render_position_space :: () {
 	using context.state;
+
+	for * velocity_swarm { it.x = 0; it.y = 0; }
+	for * position_swarm { it.x = 0; it.y = 0; }
+
+	for systems {
+		Simulation.estimate_to(
+			Sensor_Dt, trackers[0], it.accelerometer_readings[0].payload, *velocity_swarm
+		);
+		Simulation.estimate_to(
+			Sensor_Dt, velocity_swarm, *position_swarm
+		);
+	}
 
 	using Physics;
 	for trackers {
@@ -844,6 +939,10 @@ render :: () {
 		Render.render_to_screen();
 		Render.quad(.{0, 0}, .{2, 2}, Render.framebuffer_texture);
 	}
+
+	compute_velocity_position_from_cache_at(
+		*velocity_swarm, *position_swarm, systems.count - 1
+	);
 
 	if ui.interactive.space_rendered == {
 		case .Magnetic; render_magnetic_space();
@@ -904,8 +1003,8 @@ make_spaces :: () {
 		position_space.matrix.cols / 2
 	) = 1;
 
-	velocity_swarm = NewArray(1000, Physics.V2f);
-	position_swarm = NewArray(1000, Physics.V2f);
+	array_reserve(*velocity_swarm, 20);
+	array_reserve(*position_swarm, 20);
 }
 
 free_spaces :: () {

@@ -70,7 +70,11 @@ System_Reading :: struct {
 	valid := false;
 
 	estimated_pos: V2f;
+	computed_time := 0;
 
+	dirty := true;
+	velocity_swarm: [..] V2f;
+	position_swarm: [..] V2f;
 }
 
 system_is_complete :: (using this: System_Reading) -> bool {

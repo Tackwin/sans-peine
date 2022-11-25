@@ -17,6 +17,6 @@ Build sans_peine(Flags flags) noexcept {
 
 	flags.run_after_compilation = run_last;
 	auto client_build = client(flags);
-
+	
 	return Build::sequentials({usb_build, client_build});
 }

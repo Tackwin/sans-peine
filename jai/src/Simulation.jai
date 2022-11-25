@@ -32,11 +32,14 @@ transform :: (using region: Region, xi: int, yi: int) -> V2f {
 estimate_to :: (dt: float64, tracker: Tracker, acc: Accelerometer, swarm: *[] V2f) {
 	Tracy.ZONE("Estimate acc");
 
-	lawv3 := Normalv3f.make(Cast(acc.g, float32), Cast(tracker.acc_std, float32));
+	lawv3 := Normalv3f.make(acc.g - Cast(tracker.acc_mean, float32), Cast(tracker.acc_std, float32));
 
 	for * <<swarm {
 		sx := sample(Normalf.make(lawv3.mean.x, lawv3.std.x));
 		sy := sample(Normalf.make(lawv3.mean.y, lawv3.std.y));
+
+		sx = lawv3.mean.x;
+		sy = lawv3.mean.y;
 
 		it.x += cast(float32) (dt * sx);
 		it.y += cast(float32) (dt * sy);

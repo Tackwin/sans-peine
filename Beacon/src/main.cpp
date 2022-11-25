@@ -58,6 +58,9 @@ constexpr size_t ROLLING = 1;
 int last_vectors_idx[N_Beacons];
 Vectori16 last_vectors[N_Beacons * ROLLING];
 
+uint64_t micros_elapsed = 0;
+unsigned long last_micros_time = 0;
+
 void select(uint8_t port) noexcept {
 	multiplexer.selectChannel(port);
 	// for (size_t i = 0; i < N_Beacons; i += 1) {
@@ -147,6 +150,7 @@ void setup() {
 	}
 
 	for (auto& x : last_vectors_idx) x = 0;
+	last_micros_time = micros();
 }
 
 #define TYPE_MAGNETOMETER 0
@@ -188,7 +192,7 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
-	out.time = tick;
+	out.time = micros_elapsed / 1000;
 	out.type = TYPE_MAGNETOMETER;
 	out.id = id;
 	out.x = x;
@@ -216,7 +220,7 @@ void send_acc(uint8_t id, float x, float y, float z) noexcept {
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
-	out.time = tick;
+	out.time = micros_elapsed / 1000;
 	out.type = TYPE_ACCELEROMETER;
 	out.id = id;
 	out.x = x;
@@ -248,7 +252,7 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_start[i] = i;
 	for (uint8_t i = 0; i < N_Sync_Seq; ++i) out.sync_end[N_Sync_Seq - i - 1] = i;
-	out.time = tick;
+	out.time = micros_elapsed / 1000;
 	out.type = TYPE_GYROSCOPE;
 	out.id = id;
 	out.x = x;
@@ -262,6 +266,22 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 
 
 void loop() {
+	unsigned long t = micros();
+	unsigned long dt = t - last_micros_time;
+	// >TODO(Tackwin): Check that this is correct, should trigger every 70 minutes
+	// if (last_micros_time > t) dt += (uint32_t)-1;
+	
+	// serial_printf("time: %u (%u %u)\n", micros_elapsed, last_micros_time, t);
+	// Serial.print("Time: ");
+	// Serial.print((uint32_t)(micros_elapsed / 1000));
+	// Serial.print(" (");
+	// Serial.print((last_micros_time / 1000));
+	// Serial.print(" - ");
+	// Serial.print((t / 1000));
+	// Serial.print(" = ");
+	// Serial.print((dt / 1000));
+	// Serial.println(")");
+
 	for (size_t i = 0; i < N_Beacons; ++i) if (beacon_healthy[i]) {
 		select(BEACON_BUS_MAP[i]);
 		if (!beacons[i].is_data_ready()) continue;
@@ -291,7 +311,10 @@ void loop() {
 		// serial_printf("X %d Y %d Z %d\n", (int)(1000000 * gyr.XAxis), (int)(1000000 * gyr.YAxis), (int)(1000000 * gyr.ZAxis));
 	}
 	tick += 1;
-	delay(1);
+
+	micros_elapsed += dt;
+	last_micros_time = t;
+	delay(0);
 
 	// if (Serial.available() > 0) {
 	// 	#if FOR_HUMAN
