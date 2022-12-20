@@ -79,7 +79,7 @@ System_Reading :: struct {
 
 system_is_complete :: (using this: System_Reading) -> bool {
 	for magnetometer_readings if !it.valid return false;
-	for accelerometer_readings if !it.valid return false;
+	// for accelerometer_readings if !it.valid return false;
 	return true;
 }
 

@@ -48,7 +48,7 @@ Adafruit_MLX90393 mlx_beacons[N_Beacons];
 bool beacon_healthy[N_Beacons] = { };
 
 TCA9548 multiplexer(0x70);
-size_t BEACON_BUS_MAP[] = {2, 7, 7, 6, 6, 7, 6, 7};
+size_t BEACON_BUS_MAP[] = {0, 1, 7, 6, 6, 7, 6, 7};
 
 GY521 imus[N_Imus];
 size_t IMU_BUS_MAP[] = {0, 1, 3, 3, 3, 3, 3, 3};

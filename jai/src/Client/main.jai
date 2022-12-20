@@ -64,7 +64,7 @@ Ui :: struct {
 		step := false;
 		
 		averaging_selected: Simulation.Averaging = .Avg;
-		space_rendered: Simulation.Spaces = .Velocity;
+		space_rendered: Simulation.Spaces = .Magnetic;
 
 		eps : float32 = 0.00001;
 		n_probes := 300;
@@ -220,19 +220,19 @@ clear_inputs :: () {
 
 app_update :: () {
 	using context.state;
-	if ui.inputs.left_clicked {
-		defer ui.inputs.left_clicked = false;
+	// if ui.inputs.left_clicked {
+	// 	defer ui.inputs.left_clicked = false;
 
-		pos : Physics.V2f;
-		pos.x = ui.camera_pos.x - ui.camera_size.x / 2;
-		pos.x += ui.inputs.mouse_pos.x * ui.camera_size.x;
-		pos.y = ui.camera_pos.y - ui.camera_size.y / 2;
-		pos.y += ui.inputs.mouse_pos.y * ui.camera_size.y;
+	// 	pos : Physics.V2f;
+	// 	pos.x = ui.camera_pos.x - ui.camera_size.x / 2;
+	// 	pos.x += ui.inputs.mouse_pos.x * ui.camera_size.x;
+	// 	pos.y = ui.camera_pos.y - ui.camera_size.y / 2;
+	// 	pos.y += ui.inputs.mouse_pos.y * ui.camera_size.y;
 
-		b: Data.Beacon = .{};
-		b.pos = pos;
-		array_add(*beacons, b);
-	}
+	// 	b: Data.Beacon = .{};
+	// 	b.pos = pos;
+	// 	array_add(*beacons, b);
+	// }
 
 	if ui.interactive.clear_beacon {
 		defer ui.interactive.clear_beacon = false;
@@ -387,7 +387,8 @@ pen_update :: (input: Interface.Input) {
 		max_time = input.time;
 		t := max_time - min_time;
 
-		for systems.count..cast(int)ceil(cast(float32) t * Sensor_Hertz / 1000.0) add_system(it);
+		for systems.count..cast(int)ceil(cast(float32) t * Sensor_Hertz / 1000.0)
+			add_system(it * 1000 / Sensor_Hertz);
 	}
 
 	system_to_compute := NewArray(systems.count, s64, false, temp);
@@ -506,8 +507,6 @@ compute_velocity_position_from_cache_at :: (
 		last_system = 0;
 	}
 
-	print("Computing %\n", at - last_system);
-
 	array_copy(velocity_swarm, systems[last_system].velocity_swarm);
 	array_copy(position_swarm, systems[last_system].position_swarm);
 
@@ -600,7 +599,7 @@ update_system :: (system: *Data.System_Reading) {
 		USE_AVX2 :: true;
 
 		#if USE_AVX2 {
-			// Simulation.estimate_to_avx2(ui.interactive.magnet_strength, b, mag, *magnetic_space);
+			Simulation.estimate_to_avx2(ui.interactive.magnet_strength, b, mag, *magnetic_space);
 		} else {
 			// Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *magnetic_space);
 		}
@@ -959,9 +958,9 @@ init_beacon_trackers :: () {
 	context.state.beacons.count = 0;
 
 	b: Data.Beacon;
-	b.pos = Physics.V2f.make(-0.2, -0.07);
-	array_add(*context.state.beacons, b);
 	b.pos = Physics.V2f.make(-0.2, +0.07);
+	array_add(*context.state.beacons, b);
+	b.pos = Physics.V2f.make(-0.2, -0.07);
 	array_add(*context.state.beacons, b);
 
 	t: Data.Tracker;
@@ -1059,9 +1058,9 @@ main :: () {
 	ImGui_GL.ImGui_Impl_Init(*ui.imgui, ui.window);
 
 	context.state.ui.dyn_proc = load_ui("dll/ui.dll");
-	init(*ui_dll_watcher, (watcher: *File_Watcher, change: *File_Change) {
+	init(*ui_dll_watcher, (watcher: *File_Watcher(), change: *File_Change, user_data: *void) {
 		context.state.ui.dyn_proc = load_ui("dll/ui.dll");
-	}, .MODIFIED);
+	}, null, .MODIFIED);
 	defer deinit(ui_dll_watcher);
 	add_directories(*ui_dll_watcher, "dll");
 
@@ -1211,7 +1210,6 @@ DONE;
 
 	CallNextHookEx    :: (hhk: HHOOK, code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #foreign user32;
 	SetWindowsHookExA :: (id_hook: s32, hook_fn: HOOKPROC, hmod: HINSTANCE, thread_id: DWORD) -> HHOOK #foreign user32;
-	FreeLibrary       :: (module: HMODULE) -> BOOL #foreign kernel32;
 
 	HookProc :: (code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #c_call {
 		return CallNextHookEx(null, code, wparam, lparam);
