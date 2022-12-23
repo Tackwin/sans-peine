@@ -82,7 +82,7 @@ size :: (state: *State) -> int {
 init :: (state: *State) -> Interface.Init_Result {
 	<<state = .{};
 	result: Interface.Init_Result;
-	state.serial = USB.Serial.make("\\\\.\\COM3");
+	state.serial = USB.Serial.make("\\\\.\\COM5");
 	result.success = state.serial.connected;
 	return result;
 }

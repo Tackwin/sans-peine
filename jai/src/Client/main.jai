@@ -26,7 +26,7 @@ UI :: #import "UI";
 
 #scope_export
 
-Sensor_Hertz :: 200;
+Sensor_Hertz :: 100;
 Sensor_Dt    :: 1.0 / Sensor_Hertz;
 Ui :: struct {
 	imgui: ImGui_GL.UI_State;
@@ -370,7 +370,7 @@ pen_update :: (input: Interface.Input) {
 
 	add_system :: (it: int) #expand {
 		system: Data.System_Reading;
-		system.time = it + min_time;
+		system.time = it + min_time * 1000 / Sensor_Hertz;
 		for * system.magnetometer_readings if last_magnetometers[it_index].valid {
 			it.interpolated_beg = last_magnetometers[it_index].interpolated_beg;
 			it.beg = last_magnetometers[it_index].payload;
@@ -601,7 +601,7 @@ update_system :: (system: *Data.System_Reading) {
 		#if USE_AVX2 {
 			Simulation.estimate_to_avx2(ui.interactive.magnet_strength, b, mag, *magnetic_space);
 		} else {
-			// Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *magnetic_space);
+			Simulation.estimate_to(ui.interactive.magnet_strength, b, mag, *magnetic_space);
 		}
 	}
 
@@ -661,7 +661,7 @@ update_system :: (system: *Data.System_Reading) {
 			system.estimated_pos = Simulation.estimate_position_avg2(magnetic_space);
 	}
 	
-	refresh_cache();
+	// refresh_cache();
 }
 
 render_plot_mag :: () {
@@ -939,9 +939,9 @@ render :: () {
 		Render.quad(.{0, 0}, .{2, 2}, Render.framebuffer_texture);
 	}
 
-	compute_velocity_position_from_cache_at(
-		*velocity_swarm, *position_swarm, systems.count - 1
-	);
+	// compute_velocity_position_from_cache_at(
+	// 	*velocity_swarm, *position_swarm, systems.count - 1
+	// );
 
 	if ui.interactive.space_rendered == {
 		case .Magnetic; render_magnetic_space();
@@ -975,8 +975,8 @@ make_spaces :: () {
 
 	magnetic_space.space_origin = .{0, 0};
 	magnetic_space.space_size = .{0.3, 0.3};
-	magnetic_space.matrix.rows = 50;
-	magnetic_space.matrix.cols = 50;
+	magnetic_space.matrix.rows = 75;
+	magnetic_space.matrix.cols = 75;
 	magnetic_space.matrix.elements = NewArray(
 		magnetic_space.matrix.rows * magnetic_space.matrix.cols, float32
 	);

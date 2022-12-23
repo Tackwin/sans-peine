@@ -65,7 +65,7 @@ estimate_to_avx2 :: (magnet_strength: float64, beacon: Beacon, mag: Magnetometer
 	probes :: #run -> [RINGS * STARS / 8] V3f_vec {
 		radius : float32 : 0.005;
 		height : float32 : 0.06;
-		h_off  : float32 : 0.015;
+		h_off  : float32 : 0;
 		probe_aos : [RINGS * STARS] V3f;
 
 		for r: 0..RINGS-1 for s: 0..STARS-1 {
