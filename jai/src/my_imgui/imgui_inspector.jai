@@ -206,8 +206,8 @@ inspect :: (name: *u8, data: *void, info:*Type_Info, show_node_func: Show_Node_F
                     //any: Any;
                     //any.value_pointer = data;
                     //any.type = ti_enum;
-                    //TextUnformatted(tprint("%: %", to_string(name), any));
-                    TextUnformatted(to_string(name));
+                    TextUnformatted(tprint("%\0", to_string(name)));
+                    // TextUnformatted(to_string(name));
 
                     Indent(GetFrameHeight() * 0.5);
                     defer Unindent(GetFrameHeight() * 0.5);

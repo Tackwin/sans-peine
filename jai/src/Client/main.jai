@@ -27,7 +27,7 @@ UI :: #import "UI";
 #scope_export
 
 Sensor_Hertz :: 100;
-Sensor_Dt    :: 1.0 / Sensor_Hertz;
+Sensor_Dt    :: 1000.0 / Sensor_Hertz;
 Ui :: struct {
 	imgui: ImGui_GL.UI_State;
 	window: Window_Type;
@@ -58,12 +58,12 @@ Ui :: struct {
 
 		calibrating := true;
 
-		magnet_strength : float64 = 0.420;
+		magnet_strength : float64 = 0.1;
 
 		continuous := true;
 		step := false;
 		
-		averaging_selected: Simulation.Averaging = .Avg;
+		averaging_selected: Simulation.Averaging = .Avg2;
 		space_rendered: Simulation.Spaces = .Magnetic;
 
 		eps : float32 = 0.00001;
@@ -199,7 +199,7 @@ pen_input :: () {
 		}
 	}
 	else {
-		max_it := 1;
+		max_it := 100;
 		for 1..max_it {
 			new_input, has_new_input := Interface.next(current_driver);
 			if has_new_input handle_input(new_input);
@@ -366,11 +366,11 @@ pen_update :: (input: Interface.Input) {
 	}
 
 
-	if min_time > input.time min_time = input.time;
+	min_time = min(min_time, input.time);
 
-	add_system :: (it: int) #expand {
+	add_system :: (t: int) #expand {
 		system: Data.System_Reading;
-		system.time = it + min_time * 1000 / Sensor_Hertz;
+		system.time = t;
 		for * system.magnetometer_readings if last_magnetometers[it_index].valid {
 			it.interpolated_beg = last_magnetometers[it_index].interpolated_beg;
 			it.beg = last_magnetometers[it_index].payload;
@@ -386,9 +386,9 @@ pen_update :: (input: Interface.Input) {
 	if max_time <= input.time {
 		max_time = input.time;
 		t := max_time - min_time;
+		n_systems := cast(int)ceil(cast(float32) t / Sensor_Dt);
 
-		for systems.count..cast(int)ceil(cast(float32) t * Sensor_Hertz / 1000.0)
-			add_system(it * 1000 / Sensor_Hertz);
+		for systems.count..n_systems add_system(cast(int) (min_time + it * Sensor_Dt));
 	}
 
 	system_to_compute := NewArray(systems.count, s64, false, temp);
@@ -596,7 +596,7 @@ update_system :: (system: *Data.System_Reading) {
 				mag = Data.interpolate(reading.beg, reading.end, t);
 			}
 		}
-		USE_AVX2 :: true;
+		USE_AVX2 :: false;
 
 		#if USE_AVX2 {
 			Simulation.estimate_to_avx2(ui.interactive.magnet_strength, b, mag, *magnetic_space);
@@ -659,6 +659,8 @@ update_system :: (system: *Data.System_Reading) {
 			system.estimated_pos = Simulation.estimate_position_avg(magnetic_space);
 		case .Avg2;
 			system.estimated_pos = Simulation.estimate_position_avg2(magnetic_space);
+		case .Avg3;
+			system.estimated_pos = Simulation.estimate_position_avg3(magnetic_space);
 	}
 	
 	// refresh_cache();
@@ -975,8 +977,8 @@ make_spaces :: () {
 
 	magnetic_space.space_origin = .{0, 0};
 	magnetic_space.space_size = .{0.3, 0.3};
-	magnetic_space.matrix.rows = 75;
-	magnetic_space.matrix.cols = 75;
+	magnetic_space.matrix.rows = 100;
+	magnetic_space.matrix.cols = 100;
 	magnetic_space.matrix.elements = NewArray(
 		magnetic_space.matrix.rows * magnetic_space.matrix.cols, float32
 	);
@@ -1205,8 +1207,8 @@ DONE;
 	HHOOK :: HANDLE;
 	HOOKPROC :: #type (code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #c_call;
 	WH_MOUSE :: 7;
-	user32 :: #foreign_system_library "user32";
-	kernel32 :: #foreign_system_library "kernel32";
+	user32 :: #system_library "user32";
+	kernel32 :: #system_library "kernel32";
 
 	CallNextHookEx    :: (hhk: HHOOK, code: s32, wparam: WPARAM, lparam: LPARAM) -> LRESULT #foreign user32;
 	SetWindowsHookExA :: (id_hook: s32, hook_fn: HOOKPROC, hmod: HINSTANCE, thread_id: DWORD) -> HHOOK #foreign user32;
@@ -1257,5 +1259,5 @@ DONE;
 
 #scope_file
 
-USB :: #foreign_library "../../USB";
+USB :: #library "../../USB";
 #import "GL";

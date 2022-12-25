@@ -169,6 +169,7 @@ struct __attribute__((packed)) Output {
 };
 #undef round
 
+
 #define FOR_HUMAN 0
 uint32_t tick = 0;
 void send_mag(uint8_t id, float x, float y, float z) noexcept {
@@ -180,7 +181,7 @@ void send_mag(uint8_t id, float x, float y, float z) noexcept {
 		(int)(x),
 		(int)(y),
 		(int)(z),
-		(int)tick,
+		(int)(micros_elapsed / 1000),
 		sizeof(Output)
 	);
 	// serial_printf(
@@ -211,7 +212,7 @@ void send_acc(uint8_t id, float x, float y, float z) noexcept {
 		(int)(x * 1000),
 		(int)(y * 1000),
 		(int)(z * 1000),
-		(int)tick,
+		(int)(micros_elapsed / 1000),
 		sizeof(Output)
 	);
 #else
@@ -240,7 +241,7 @@ void send_gyr(uint8_t id, float x, float y, float z) noexcept {
 		(int)(x),
 		(int)(y),
 		(int)(z),
-		(int)tick,
+		(int)(micros_elapsed / 1000),
 		sizeof(Output)
 	);
 	// serial_printf(

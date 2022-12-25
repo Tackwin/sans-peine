@@ -27,6 +27,86 @@ magnetic_field :: (m: V3($T), r: V3(T)) -> V3(T) {
 	return B;
 }
 
+cylindrycal_field :: (m: V3($T), dt: V3(T), hh: T, r0: T) -> V3(T) {
+	r := sqrt(dt.x * dt.x + dt.y * dt.y) / r0;
+	phi := atan2(dt.y, dt.x);
+	z := dt.z / r0;
+	z0 := hh / r0;
+
+	zph := z + z0;
+	zmh := z - z0;
+	dpr := 1 + r;
+	dmr := 1 - r;
+
+	sq0 := sqrt(zmh * zmh + dpr * dpr);
+	sq1 := sqrt(zph * zph + dpr * dpr);
+
+	k0 := sqrt((zmh * zmh + dmr * dmr) / (zmh * zmh + dpr * dpr));
+	k1 := sqrt((zph * zph + dmr * dmr) / (zph * zph + dpr * dpr));
+
+	gamma := dmr / dpr;
+
+	cel :: (kc: T, p: T, c: T, s: T) -> T {
+		assert(kc != 0);
+
+		errtol := 0.001;
+		k := abs(kc);
+		pp := p;
+		cc := c;
+		ss := s;
+		em := cast(float64) 1.0;
+		if p > 0 {
+			pp = sqrt(p);
+			ss = s / pp;
+		} else {
+			f := kc * kc;
+			q := 1 - f;
+			g := 1 - pp;
+			f = f - pp;
+			q = q * (ss - c * pp);
+			pp = sqrt(f / g);
+			cc = (c - ss) / g;
+			ss = -q / (g * g * pp) + cc * pp;
+		}
+
+		f := cc;
+		cc = cc + ss / pp;
+		g := k / pp;
+		ss = 2 * (ss + f * g);
+		pp = g + pp;
+		g = em;
+		em = k + em;
+		kk := k;
+		while abs(g - k) > g * errtol {
+			k = 2 * sqrt(kk);
+			kk = k * em;
+			f = cc;
+			cc = cc + ss / pp;
+			g = kk / pp;
+			ss = 2 * (ss + f * g);
+			pp = g + pp;
+			g = em;
+			em = k + em;
+		}
+
+		return PI / 2 * (ss + cc * em) / (em * (em + pp));
+	}
+
+	g := gamma;
+	gg := gamma * gamma;
+
+	Br := (cel(k1, 1, 1, -1) / sq1 - cel(k0, 1, 1, -1) / sq0) / PI;
+	Bz := (zph * cel(k1, gg, 1, g) / sq1 - zmh * cel(k0, gg, 1, g) / sq0) / dpr / PI;
+
+	Br *= m.z;
+	Bz *= m.z;
+
+	Bx := Br * cos(phi);
+	By := Br * sin(phi);
+
+	return .{ Bx, By, Bz };
+}
+
 indices :: u32.[
 	0, 0, 0, 0, 0, 0, 0, 0,
 	1, 1, 1, 1, 1, 1, 1, 1,

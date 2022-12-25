@@ -11,7 +11,7 @@ Interface :: #import "Interface";
 	#import "Windows_Utf8";
 	SetThreadDescription :: (thread: Windows.HANDLE, name: Windows.LPCWSTR) #foreign kernel32;
 
-	kernel32    :: #foreign_system_library "kernel32";
+	kernel32    :: #system_library "kernel32";
 }
 
 INTERFACE_STRING_NO_RETURN :: #string DONE

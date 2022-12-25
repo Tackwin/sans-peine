@@ -30,7 +30,7 @@
 		cbInQue:   Windows.DWORD;
 		cbOutQue:  Windows.DWORD;
 	};
-	kernel32    :: #foreign_system_library "kernel32";
+	kernel32    :: #system_library "kernel32";
 
 	GetCommState :: (handle: Windows.HANDLE, dcb: *DCB) -> Windows.BOOL #foreign kernel32;
 	SetCommState :: (handle: Windows.HANDLE, dcb: *DCB) -> Windows.BOOL #foreign kernel32;

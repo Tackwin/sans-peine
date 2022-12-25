@@ -7,10 +7,10 @@
 
 
 #if LINK_STATIC {
-    user32 :: #foreign_system_library "user32";
-    imgui :: #foreign_library,no_dll "imgui";
+    user32 :: #system_library "user32";
+    imgui :: #library,no_dll "imgui";
 } else {
-    imgui :: #foreign_library "./win/dll/imgui";
+    imgui :: #library "./win/dll/imgui";
 }
 
 make_ImVec2 :: inline (a: float, b: float) -> ImVec2 {

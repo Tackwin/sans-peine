@@ -47,7 +47,7 @@ ___tracy_emit_plot                         :: (name: *c.char, val: c.double)    
 ___tracy_emit_message_appinfo              :: (txt: *c.char, size: c.size_t)                                                                                                    #foreign tracy;
 
 #if OS == .WINDOWS {
-    tracy :: #foreign_library,no_dll "../lib/TracyClient";
+    tracy :: #library,no_dll "../lib/TracyClient";
 } else #if OS == .LINUX {
     // tracy :: #foreign_library "linux/tracy";
 } else #if OS == .MACOS {

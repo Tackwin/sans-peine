@@ -33,7 +33,7 @@ build_client :: () -> Workspace {
 	opts.import_path = import;
 	opts.text_output_flags = 0;
 	opts.emit_debug_info = .CODEVIEW;
-	// opts.llvm_options.disable_inlining = true;
+	opts.llvm_options.disable_inlining = true;
 	set_build_options(opts, w);
 	return w;
 }
